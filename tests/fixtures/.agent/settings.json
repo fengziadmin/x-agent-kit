@@ -1,0 +1,17 @@
+{
+  "brain": {
+    "provider": "gemini",
+    "model": "gemini-2.5-flash"
+  },
+  "providers": {
+    "claude": { "type": "cli" },
+    "gemini": { "type": "api", "api_key_env": "GOOGLE_API_KEY", "default_model": "gemini-2.5-flash" },
+    "openai": { "type": "api", "api_key_env": "OPENAI_API_KEY", "default_model": "gpt-4o" }
+  },
+  "channels": {
+    "default": "cli",
+    "feishu": { "app_id_env": "LARK_APP_ID", "app_secret_env": "LARK_APP_SECRET", "default_chat_id_env": "LARK_CHAT_ID" }
+  },
+  "skills": { "paths": [".agent/skills"] },
+  "agent": { "max_iterations": 50, "approval_timeout": 3600 }
+}
