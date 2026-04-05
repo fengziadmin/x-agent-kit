@@ -114,9 +114,27 @@ class StreamingCard:
         """Finish streaming and replace with final card."""
         if not self._card_id:
             return
-        self._sequence += 1
 
-        # Step 1: Close streaming mode
+        # Step 1: Update streaming text to final content
+        self.update_text(content)
+
+        # Step 2: Clear the loading icon
+        self._sequence += 1
+        try:
+            req = ContentCardElementRequest.builder() \
+                .card_id(self._card_id) \
+                .element_id(LOADING_ELEMENT_ID) \
+                .request_body(ContentCardElementRequestBody.builder()
+                    .content("✅")
+                    .sequence(self._sequence)
+                    .build()
+                ).build()
+            self._client.cardkit.v1.card_element.content(req)
+        except Exception:
+            pass
+
+        # Step 3: Close streaming mode
+        self._sequence += 1
         try:
             settings_req = SettingsCardRequest.builder() \
                 .card_id(self._card_id) \
@@ -126,32 +144,31 @@ class StreamingCard:
                     .build()
                 ).build()
             self._client.cardkit.v1.card.settings(settings_req)
-        except Exception as exc:
-            logger.debug(f"CardKit settings error: {exc}")
+        except Exception:
+            pass
 
-        self._sequence += 1
-
-        # Step 2: Replace with final card
-        try:
-            final_card = json.dumps({
-                "schema": "2.0",
-                "header": {"title": {"content": title, "tag": "plain_text"}, "template": color},
-                "body": {"elements": [
-                    {"tag": "markdown", "content": content},
-                ]},
-            })
-            update_req = UpdateCardRequest.builder() \
-                .card_id(self._card_id) \
-                .request_body(UpdateCardRequestBody.builder()
-                    .card(final_card)
-                    .sequence(self._sequence)
+        # Step 4: Update card header via im.message.patch (more reliable than cardkit.update)
+        if self._message_id:
+            try:
+                from lark_oapi.api.im.v1 import PatchMessageRequest, PatchMessageRequestBody
+                final_card = json.dumps({
+                    "schema": "2.0",
+                    "header": {"title": {"content": title, "tag": "plain_text"}, "template": color},
+                    "body": {"elements": [
+                        {"tag": "markdown", "content": content},
+                    ]},
+                })
+                req = PatchMessageRequest.builder() \
+                    .message_id(self._message_id) \
+                    .request_body(PatchMessageRequestBody.builder().content(final_card).build()) \
                     .build()
-                ).build()
-            resp = self._client.cardkit.v1.card.update(update_req)
-            if not resp.success():
-                logger.debug(f"CardKit update failed: {resp.code} {resp.msg}")
-        except Exception as exc:
-            logger.debug(f"CardKit update error: {exc}")
+                resp = self._client.im.v1.message.patch(req)
+                if resp.success():
+                    logger.debug(f"Card patched to complete: {self._message_id}")
+                else:
+                    logger.debug(f"Card patch failed: {resp.code} {resp.msg}")
+            except Exception as exc:
+                logger.debug(f"Card patch error: {exc}")
 
 
 def build_status_card(title: str, status: str, color: str, content: str = "") -> dict:
@@ -165,7 +182,7 @@ def build_status_card(title: str, status: str, color: str, content: str = "") ->
         "header": {
             "title": {"content": title, "tag": "plain_text"},
             "template": template,
-            "text_tag_list": [{"text": {"tag": "plain_text", "content": tag_text.get(status, status)}, "color": template}],
+            "text_tag_list": [{"tag": "text_tag", "text": {"tag": "plain_text", "content": tag_text.get(status, status)}, "color": template}],
         },
         "body": {"elements": []},
     }
@@ -205,7 +222,127 @@ def build_confirmation_card(request_id: str, action: str, details: str, preview:
         "header": {
             "title": {"content": f"⚠️ 审批: {action}", "tag": "plain_text"},
             "template": "orange",
-            "text_tag_list": [{"text": {"tag": "plain_text", "content": "待审批"}, "color": "orange"}],
+            "text_tag_list": [{"tag": "text_tag", "text": {"tag": "plain_text", "content": "待审批"}, "color": "orange"}],
+        },
+        "body": {"elements": elements},
+    }
+
+
+# ---------------------------------------------------------------------------
+# Plan approval card builders
+# ---------------------------------------------------------------------------
+
+_RISK_LABELS = {"high": "🔴 高风险", "medium": "🟡 中风险", "low": "🟢 低风险"}
+_PRIORITY_LABELS = {"high": "紧急", "medium": "常规", "low": "低优"}
+_TYPE_LABELS = {"daily": "日常计划", "weekly": "周度策略", "monthly": "月度复盘"}
+
+
+def build_plan_approval_card(plan) -> dict:
+    """Build an orange plan approval card with per-step approve/reject buttons."""
+    from x_agent_kit.plan import Plan  # noqa: F811 — deferred to avoid circular imports
+
+    type_label = _TYPE_LABELS.get(plan.plan_type, plan.plan_type)
+    step_count = len(plan.steps)
+
+    elements: list[dict] = [
+        {"tag": "markdown", "content": f"**摘要**: {plan.summary}"},
+        {"tag": "hr"},
+    ]
+
+    for step in plan.steps:
+        risk_label = _RISK_LABELS.get(step.risk_level, step.risk_level)
+        priority_label = _PRIORITY_LABELS.get(step.priority, step.priority)
+
+        elements.append(
+            {"tag": "markdown", "content": f"{risk_label}  |  **{priority_label}**\n{step.action}"}
+        )
+        elements.append({
+            "tag": "column_set",
+            "columns": [
+                {"tag": "column", "width": "weighted", "weight": 1, "elements": [
+                    {"tag": "button", "text": {"tag": "plain_text", "content": "✅ 批准"},
+                     "type": "primary",
+                     "behaviors": [{"type": "callback", "value": {
+                         "plan_id": plan.plan_id, "step_id": step.step_id, "decision": "approve"}}]},
+                ]},
+                {"tag": "column", "width": "weighted", "weight": 1, "elements": [
+                    {"tag": "button", "text": {"tag": "plain_text", "content": "❌ 拒绝"},
+                     "type": "danger",
+                     "behaviors": [{"type": "callback", "value": {
+                         "plan_id": plan.plan_id, "step_id": step.step_id, "decision": "reject"}}]},
+                ]},
+            ],
+        })
+        elements.append({"tag": "hr"})
+
+    return {
+        "schema": "2.0",
+        "header": {
+            "title": {"content": f"📋 {plan.title}", "tag": "plain_text"},
+            "template": "orange",
+            "text_tag_list": [
+                {"tag": "text_tag", "text": {"tag": "plain_text", "content": type_label}, "color": "orange"},
+                {"tag": "text_tag", "text": {"tag": "plain_text", "content": f"{step_count} 步骤"}, "color": "turquoise"},
+            ],
+        },
+        "body": {"elements": elements},
+    }
+
+
+def build_step_result_card(step, result: str) -> dict:
+    """Build a result card after step execution — green for success, red for failure."""
+    is_failed = step.status == "failed"
+    template = "red" if is_failed else "green"
+    icon = "❌" if is_failed else "✅"
+    status_text = "执行失败" if is_failed else "执行成功"
+
+    return {
+        "schema": "2.0",
+        "header": {
+            "title": {"content": f"{icon} {status_text}: {step.action}", "tag": "plain_text"},
+            "template": template,
+        },
+        "body": {"elements": [
+            {"tag": "markdown", "content": f"**操作**: {step.action}"},
+            {"tag": "hr"},
+            {"tag": "markdown", "content": f"**结果**: {result}"},
+        ]},
+    }
+
+
+def build_negotiation_card(step, new_proposal: str) -> dict:
+    """Build a blue negotiation card for re-proposing a rejected step."""
+    elements: list[dict] = []
+
+    if step.rejection_note:
+        elements.append({"tag": "markdown", "content": f"**拒绝原因**: {step.rejection_note}"})
+        elements.append({"tag": "hr"})
+
+    elements.append({"tag": "markdown", "content": f"**新方案**: {new_proposal}"})
+    elements.append({"tag": "hr"})
+    elements.append({
+        "tag": "column_set",
+        "columns": [
+            {"tag": "column", "width": "weighted", "weight": 1, "elements": [
+                {"tag": "button", "text": {"tag": "plain_text", "content": "✅ 批准"},
+                 "type": "primary",
+                 "behaviors": [{"type": "callback", "value": {
+                     "step_id": step.step_id, "decision": "approve"}}]},
+            ]},
+            {"tag": "column", "width": "weighted", "weight": 1, "elements": [
+                {"tag": "button", "text": {"tag": "plain_text", "content": "💬 继续讨论"},
+                 "type": "default",
+                 "behaviors": [{"type": "callback", "value": {
+                     "step_id": step.step_id, "decision": "discuss"}}]},
+            ]},
+        ],
+    })
+
+    return {
+        "schema": "2.0",
+        "header": {
+            "title": {"content": f"🔄 协商: {step.action}", "tag": "plain_text"},
+            "template": "blue",
         },
         "body": {"elements": elements},
     }
