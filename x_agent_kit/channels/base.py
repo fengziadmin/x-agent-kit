@@ -11,3 +11,6 @@ class BaseChannel:
     def send_approval_card(self, request_id: str, action: str, details: str) -> dict[str, Any]:
         """Send an approval card with approve/reject buttons."""
         raise NotImplementedError
+    def send_streaming_start(self, title: str = "Processing...") -> Any:
+        """Start a streaming card. Returns a card handle for updates."""
+        return None

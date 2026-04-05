@@ -28,3 +28,18 @@ class CLIChannel(BaseChannel):
         print(f"  ID: {request_id}")
         print(f"{'='*40}")
         return {"ok": True, "request_id": request_id}
+
+    def send_streaming_start(self, title: str = "Processing...") -> Any:
+        print(f"\n[{title}]")
+        return CLIStreamingCard()
+
+
+class CLIStreamingCard:
+    def update_text(self, text: str):
+        print(f"\r{text[:80]}", end="", flush=True)
+
+    def append_text(self, text: str):
+        print(text, end="", flush=True)
+
+    def complete(self, title: str, content: str, color: str = "green"):
+        print(f"\n[{title}] {content[:200]}")

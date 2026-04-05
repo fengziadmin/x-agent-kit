@@ -10,6 +10,7 @@ from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody, 
 from lark_oapi.event.callback.model.p2_card_action_trigger import P2CardActionTrigger, P2CardActionTriggerResponse
 from loguru import logger
 from x_agent_kit.channels.base import BaseChannel
+from x_agent_kit.channels.feishu_cards import StreamingCard, build_confirmation_card, build_status_card
 
 _APPROVAL_DIR = Path("/tmp/x-agent-approvals")
 
@@ -97,24 +98,14 @@ class FeishuChannel(BaseChannel):
         return "TIMEOUT"
 
     def send_approval_card(self, request_id: str, action: str, details: str) -> dict[str, Any]:
-        card = {
-            "schema": "2.0",
-            "header": {"title": {"content": f"审批: {action}", "tag": "plain_text"}, "template": "orange"},
-            "body": {"elements": [
-                {"tag": "markdown", "content": f"**操作**: {action}\n\n{details}"},
-                {"tag": "column_set", "columns": [
-                    {"tag": "column", "width": "weighted", "weight": 1, "elements": [
-                        {"tag": "button", "text": {"tag": "plain_text", "content": "✅ 批准"}, "type": "primary",
-                         "behaviors": [{"type": "callback", "value": {"request_id": request_id, "decision": "approve"}}]},
-                    ]},
-                    {"tag": "column", "width": "weighted", "weight": 1, "elements": [
-                        {"tag": "button", "text": {"tag": "plain_text", "content": "❌ 拒绝"}, "type": "danger",
-                         "behaviors": [{"type": "callback", "value": {"request_id": request_id, "decision": "reject"}}]},
-                    ]},
-                ]},
-            ]},
-        }
+        card = build_confirmation_card(request_id, action, details)
         return self.send_card(card)
+
+    def send_streaming_start(self, title: str = "🤔 分析中...") -> StreamingCard:
+        """Create and send a streaming card. Returns StreamingCard for updates."""
+        card = StreamingCard(self._client, self._chat_id)
+        card.start(title)
+        return card
 
     def set_approval_queue(self, queue) -> None:
         self._approval_queue = queue
@@ -181,11 +172,12 @@ class FeishuChannel(BaseChannel):
 
     def _patch_card(self, message_id: str, decision: str, request_id: str) -> None:
         time.sleep(1)
-        label = "Approved" if decision == "approve" else "Rejected"
-        color = "green" if decision == "approve" else "red"
-        card = json.dumps({"schema": "2.0", "header": {"title": {"content": label, "tag": "plain_text"}, "template": color}, "body": {"elements": [{"tag": "markdown", "content": f"{label}: {request_id[:8]}..."}]}})
+        status = "complete" if decision == "approve" else "error"
+        title = "✅ 已批准" if decision == "approve" else "❌ 已拒绝"
+        action_text = "正在执行..." if decision == "approve" else "操作已取消"
+        card = build_status_card(title, status, "green" if decision == "approve" else "red", f"审批请求 `{request_id[:8]}...` {title}，{action_text}")
         try:
-            req = PatchMessageRequest.builder().message_id(message_id).request_body(PatchMessageRequestBody.builder().content(card).build()).build()
+            req = PatchMessageRequest.builder().message_id(message_id).request_body(PatchMessageRequestBody.builder().content(json.dumps(card)).build()).build()
             self._client.im.v1.message.patch(req)
         except Exception as exc:
             logger.error(f"Patch card failed: {exc}")
