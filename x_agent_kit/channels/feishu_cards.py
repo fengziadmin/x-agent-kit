@@ -318,7 +318,7 @@ def build_plan_approval_card(plan) -> dict:
             "template": header_color,
             "text_tag_list": [
                 {"tag": "text_tag", "text": {"tag": "plain_text", "content": type_label}, "color": "orange"},
-                {"tag": "text_tag", "text": {"tag": "plain_text", "content": f"{pending}/{step_count} 待审批"}, "color": "turquoise" if pending > 0 else "green"},
+                {"tag": "text_tag", "text": {"tag": "plain_text", "content": f"全部通过 ✅" if pending == 0 and all(s.status in ("approved", "executed") for s in plan.steps) else f"{pending} 项待审批 / 共 {step_count} 项"}, "color": "green" if pending == 0 else "turquoise"},
             ],
         },
         "body": {"elements": elements},
