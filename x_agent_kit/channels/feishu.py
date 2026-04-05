@@ -193,6 +193,28 @@ class FeishuChannel(BaseChannel):
                     threading.Thread(
                         target=self._patch_plan_step_card, args=(msg_id, decision, plan_id, step_id), daemon=True
                     ).start()
+                # Auto-execute approved step immediately
+                if decision == "approve" and self._tool_executor:
+                    plan = self._plan_manager.get(plan_id)
+                    step = next((s for s in plan.steps if s.step_id == step_id), None) if plan else None
+                    if step and step.tool_name:
+                        def execute_step(p_id=plan_id, s_id=step_id, s=step):
+                            try:
+                                result = self._tool_executor(s.tool_name, s.tool_args)
+                                self._plan_manager.set_step_result(p_id, s_id, str(result))
+                                self._plan_manager.refresh_plan_status(p_id)
+                                logger.info(f"Plan step executed: {s.action[:50]} → {str(result)[:100]}")
+                                from x_agent_kit.channels.feishu_cards import build_step_result_card
+                                self.send_card(build_step_result_card(s, str(result)))
+                            except Exception as exc:
+                                self._plan_manager.update_step_status(p_id, s_id, "failed")
+                                self._plan_manager.set_step_result(p_id, s_id, str(exc))
+                                self._plan_manager.refresh_plan_status(p_id)
+                                logger.error(f"Plan step failed: {s.action[:50]} → {exc}")
+                                s.status = "failed"
+                                from x_agent_kit.channels.feishu_cards import build_step_result_card
+                                self.send_card(build_step_result_card(s, str(exc)))
+                        threading.Thread(target=execute_step, daemon=True).start()
                 if decision == "reject" and self._message_handler:
                     try:
                         self._message_handler(plan_id, step_id, "reject")
