@@ -200,7 +200,10 @@ class FeishuChannel(BaseChannel):
                     if step and step.tool_name:
                         def execute_step(p_id=plan_id, s_id=step_id, s=step):
                             try:
-                                result = self._tool_executor(s.tool_name, s.tool_args)
+                                args = s.tool_args
+                                if isinstance(args, str):
+                                    args = json.loads(args)
+                                result = self._tool_executor(s.tool_name, args)
                                 self._plan_manager.set_step_result(p_id, s_id, str(result))
                                 self._plan_manager.refresh_plan_status(p_id)
                                 logger.info(f"Plan step executed: {s.action[:50]} → {str(result)[:100]}")
@@ -217,7 +220,14 @@ class FeishuChannel(BaseChannel):
                         threading.Thread(target=execute_step, daemon=True).start()
                 if decision == "reject" and self._message_handler:
                     try:
-                        self._message_handler(plan_id, step_id, "reject")
+                        plan = self._plan_manager.get(plan_id) if not plan else plan
+                        step = next((s for s in plan.steps if s.step_id == step_id), None) if plan else None
+                        action_desc = step.action if step else step_id
+                        note = step.rejection_note or "" if step else ""
+                        self._message_handler(
+                            self._chat_id,
+                            f"[PLAN_STEP_REJECTED] plan_id={plan_id} step_id={step_id} action={action_desc} note={note}"
+                        )
                     except Exception as exc:
                         logger.error(f"Message handler error on plan step rejection: {exc}")
                 return resp
