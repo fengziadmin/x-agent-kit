@@ -237,12 +237,29 @@ _PRIORITY_LABELS = {"high": "紧急", "medium": "常规", "low": "低优"}
 _TYPE_LABELS = {"daily": "日常计划", "weekly": "周度策略", "monthly": "月度复盘"}
 
 
+_STEP_STATUS_LABELS = {
+    "approved": "✅ 已批准",
+    "rejected": "❌ 已拒绝",
+    "executed": "✅ 已执行",
+    "failed": "❌ 执行失败",
+    "negotiating": "💬 协商中",
+}
+
+
 def build_plan_approval_card(plan) -> dict:
-    """Build an orange plan approval card with per-step approve/reject buttons."""
+    """Build an orange plan approval card with per-step approve/reject buttons.
+
+    Steps that have already been approved/rejected show a status label instead of buttons.
+    This allows the card to be patched in-place after each decision without losing other steps.
+    """
     from x_agent_kit.plan import Plan  # noqa: F811 — deferred to avoid circular imports
 
     type_label = _TYPE_LABELS.get(plan.plan_type, plan.plan_type)
     step_count = len(plan.steps)
+
+    # Count decided steps
+    decided = sum(1 for s in plan.steps if s.status not in ("pending",))
+    pending = step_count - decided
 
     elements: list[dict] = [
         {"tag": "markdown", "content": f"**摘要**: {plan.summary}"},
@@ -253,36 +270,55 @@ def build_plan_approval_card(plan) -> dict:
         risk_label = _RISK_LABELS.get(step.risk_level, step.risk_level)
         priority_label = _PRIORITY_LABELS.get(step.priority, step.priority)
 
-        elements.append(
-            {"tag": "markdown", "content": f"{risk_label}  |  **{priority_label}**\n{step.action}"}
-        )
-        elements.append({
-            "tag": "column_set",
-            "columns": [
-                {"tag": "column", "width": "weighted", "weight": 1, "elements": [
-                    {"tag": "button", "text": {"tag": "plain_text", "content": "✅ 批准"},
-                     "type": "primary",
-                     "behaviors": [{"type": "callback", "value": {
-                         "plan_id": plan.plan_id, "step_id": step.step_id, "decision": "approve"}}]},
-                ]},
-                {"tag": "column", "width": "weighted", "weight": 1, "elements": [
-                    {"tag": "button", "text": {"tag": "plain_text", "content": "❌ 拒绝"},
-                     "type": "danger",
-                     "behaviors": [{"type": "callback", "value": {
-                         "plan_id": plan.plan_id, "step_id": step.step_id, "decision": "reject"}}]},
-                ]},
-            ],
-        })
+        if step.status in _STEP_STATUS_LABELS:
+            # Already decided — show status text instead of buttons
+            status_text = _STEP_STATUS_LABELS[step.status]
+            elements.append(
+                {"tag": "markdown", "content": f"{risk_label}  |  **{priority_label}**\n{step.action}\n\n**{status_text}**"}
+            )
+        else:
+            # Pending — show approve/reject buttons
+            elements.append(
+                {"tag": "markdown", "content": f"{risk_label}  |  **{priority_label}**\n{step.action}"}
+            )
+            elements.append({
+                "tag": "column_set",
+                "columns": [
+                    {"tag": "column", "width": "weighted", "weight": 1, "elements": [
+                        {"tag": "button", "text": {"tag": "plain_text", "content": "✅ 批准"},
+                         "type": "primary",
+                         "behaviors": [{"type": "callback", "value": {
+                             "plan_id": plan.plan_id, "step_id": step.step_id, "decision": "approve"}}]},
+                    ]},
+                    {"tag": "column", "width": "weighted", "weight": 1, "elements": [
+                        {"tag": "button", "text": {"tag": "plain_text", "content": "❌ 拒绝"},
+                         "type": "danger",
+                         "behaviors": [{"type": "callback", "value": {
+                             "plan_id": plan.plan_id, "step_id": step.step_id, "decision": "reject"}}]},
+                    ]},
+                ],
+            })
         elements.append({"tag": "hr"})
+
+    # Header color: orange if pending, green if all approved/executed, red if any rejected
+    if pending == 0 and all(s.status in ("approved", "executed") for s in plan.steps):
+        header_color = "green"
+        header_title = f"✅ {plan.title}"
+    elif pending == 0:
+        header_color = "blue"
+        header_title = f"📋 {plan.title} (已处理)"
+    else:
+        header_color = "orange"
+        header_title = f"📋 {plan.title}"
 
     return {
         "schema": "2.0",
         "header": {
-            "title": {"content": f"📋 {plan.title}", "tag": "plain_text"},
-            "template": "orange",
+            "title": {"content": header_title, "tag": "plain_text"},
+            "template": header_color,
             "text_tag_list": [
                 {"tag": "text_tag", "text": {"tag": "plain_text", "content": type_label}, "color": "orange"},
-                {"tag": "text_tag", "text": {"tag": "plain_text", "content": f"{step_count} 步骤"}, "color": "turquoise"},
+                {"tag": "text_tag", "text": {"tag": "plain_text", "content": f"{pending}/{step_count} 待审批"}, "color": "turquoise" if pending > 0 else "green"},
             ],
         },
         "body": {"elements": elements},

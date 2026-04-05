@@ -244,24 +244,25 @@ class FeishuChannel(BaseChannel):
         return resp
 
     def _patch_plan_step_card(self, message_id: str, decision: str, plan_id: str, step_id: str) -> None:
-        time.sleep(1)
-        if decision == "approve":
-            title = "✅ 步骤已批准"
-            color = "green"
-            content = f"计划 `{plan_id[:8]}...` 步骤 `{step_id[:8]}...` 已批准，等待执行..."
-        else:
-            title = "❌ 步骤已拒绝"
-            color = "red"
-            content = f"计划 `{plan_id[:8]}...` 步骤 `{step_id[:8]}...` 已拒绝。"
+        """Re-render the full plan card with updated step statuses.
 
-        card = {
-            "schema": "2.0",
-            "header": {"title": {"content": title, "tag": "plain_text"}, "template": color},
-            "body": {"elements": [{"tag": "markdown", "content": content}]},
-        }
+        Instead of replacing the entire card with a single status message,
+        this rebuilds the card from PlanManager so decided steps show status
+        labels while pending steps keep their approve/reject buttons.
+        """
+        time.sleep(0.5)
         try:
-            req = PatchMessageRequest.builder().message_id(message_id).request_body(PatchMessageRequestBody.builder().content(json.dumps(card)).build()).build()
+            from x_agent_kit.channels.feishu_cards import build_plan_approval_card
+            plan = self._plan_manager.get(plan_id) if self._plan_manager else None
+            if not plan:
+                logger.error(f"Cannot patch card: plan {plan_id} not found")
+                return
+            card = build_plan_approval_card(plan)
+            req = PatchMessageRequest.builder().message_id(message_id).request_body(
+                PatchMessageRequestBody.builder().content(json.dumps(card)).build()
+            ).build()
             self._client.im.v1.message.patch(req)
+            logger.info(f"Plan card patched: step {step_id[:8]}... → {decision}")
         except Exception as exc:
             logger.error(f"Patch plan step card failed: {exc}")
 
