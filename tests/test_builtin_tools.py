@@ -39,10 +39,26 @@ class TestBuiltinNotify:
         mock_channels["default"].send_text.assert_called_once_with("hello")
 
 class TestBuiltinRequestApproval:
-    def test_request_approval_calls_channel(self):
+    def test_request_approval_sends_card(self):
         from x_agent_kit.tools.builtin import create_request_approval_tool
         mock_channels = {"default": MagicMock()}
-        mock_channels["default"].request_approval.return_value = "APPROVED"
+        mock_channels["default"].send_approval_card.return_value = {"ok": True}
         fn = create_request_approval_tool(mock_channels)
         result = fn(action="test", details="detail")
-        assert result == "APPROVED"
+        mock_channels["default"].send_approval_card.assert_called_once()
+        assert "Approval request sent" in result
+
+    def test_request_approval_queues_when_tool_name_given(self):
+        from x_agent_kit.tools.builtin import create_request_approval_tool
+        from unittest.mock import MagicMock
+        mock_channels = {"default": MagicMock()}
+        mock_channels["default"].send_approval_card.return_value = {"ok": True}
+        mock_queue = MagicMock()
+        fn = create_request_approval_tool(mock_channels, approval_queue=mock_queue)
+        result = fn(action="Pause", details="details", tool_name="pause_campaign", tool_args='{"id": "123"}')
+        mock_queue.add.assert_called_once()
+        call_args = mock_queue.add.call_args[0]
+        assert call_args[1] == "Pause"       # action
+        assert call_args[3] == "pause_campaign"  # tool_name
+        assert call_args[4] == {"id": "123"}     # tool_args
+        assert "pause_campaign" in result

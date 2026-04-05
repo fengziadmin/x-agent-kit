@@ -1,4 +1,5 @@
 from __future__ import annotations
+from pathlib import Path
 from typing import Any
 from loguru import logger
 from x_agent_kit.config import Config, load_config
@@ -53,15 +54,26 @@ class Agent:
         self._tools.register(create_load_skill_tool(self._skills))
         self._tools.register(create_list_skills_tool(self._skills))
         self._tools.register(create_notify_tool(self._channels))
-        self._tools.register(create_request_approval_tool(self._channels))
 
         self._memory = None
+        self._approval_queue = None
         if self._config.memory.enabled:
             from x_agent_kit.memory import Memory
+            from x_agent_kit.approval_queue import ApprovalQueue
             self._memory = Memory(memory_dir=self._config.memory.dir)
+            self._approval_queue = ApprovalQueue(db_path=str(Path(self._config.memory.dir) / "memory.db"))
             self._tools.register(create_save_memory_tool(self._memory))
             self._tools.register(create_recall_memories_tool(self._memory))
             self._tools.register(create_search_memory_tool(self._memory))
+
+            # Wire up feishu channel for async execution
+            feishu = self._channels.get("feishu")
+            if feishu and hasattr(feishu, 'set_approval_queue'):
+                feishu.set_approval_queue(self._approval_queue)
+                feishu.set_tool_executor(lambda name, args: self._tools.execute(name, args))
+                feishu._ensure_ws()  # Start WebSocket listener
+
+        self._tools.register(create_request_approval_tool(self._channels, self._approval_queue))
 
     def register_tools(self, tools: list) -> None:
         for t in tools:

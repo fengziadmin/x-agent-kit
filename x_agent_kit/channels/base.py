@@ -8,3 +8,6 @@ class BaseChannel:
         raise NotImplementedError
     def request_approval(self, action: str, details: str, timeout: int = 3600) -> str:
         raise NotImplementedError
+    def send_approval_card(self, request_id: str, action: str, details: str) -> dict[str, Any]:
+        """Send an approval card with approve/reject buttons."""
+        raise NotImplementedError

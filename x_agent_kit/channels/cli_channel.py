@@ -20,3 +20,11 @@ class CLIChannel(BaseChannel):
         print(f"{'='*40}")
         answer = input("  Approve? (y/n): ").strip().lower()
         return "APPROVED" if answer in ("y", "yes") else "REJECTED"
+
+    def send_approval_card(self, request_id: str, action: str, details: str) -> dict[str, Any]:
+        print(f"\n{'='*40}")
+        print(f"  APPROVAL REQUEST: {action}")
+        print(f"  Details: {details}")
+        print(f"  ID: {request_id}")
+        print(f"{'='*40}")
+        return {"ok": True, "request_id": request_id}

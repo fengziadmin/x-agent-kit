@@ -20,9 +20,55 @@ class FeishuChannel(BaseChannel):
         self._app_secret = app_secret
         self._client = lark.Client.builder().app_id(app_id).app_secret(app_secret).log_level(lark.LogLevel.ERROR).build()
         self._ws_started = False
+        self._approval_queue = None
+        self._tool_executor = None
 
     def send_text(self, text: str) -> dict[str, Any]:
+        # If text contains markdown, send as card for proper rendering
+        if any(mk in text for mk in ("##", "**", "- ", "* ", "```", "1. ")):
+            return self._send_markdown_card(text)
         return self._send("text", json.dumps({"text": text}))
+
+    def _send_markdown_card(self, text: str) -> dict[str, Any]:
+        """Send long markdown text as a card, split into chunks if needed."""
+        # Extract title from first ## heading if present
+        title = "Agent Report"
+        lines = text.split("\n")
+        for line in lines:
+            if line.startswith("## "):
+                title = line.lstrip("# ").strip()
+                break
+
+        # Feishu card markdown has a ~4000 char limit per element, split if needed
+        chunks = []
+        current = []
+        current_len = 0
+        for line in lines:
+            if current_len + len(line) > 3500 and current:
+                chunks.append("\n".join(current))
+                current = []
+                current_len = 0
+            current.append(line)
+            current_len += len(line) + 1
+        if current:
+            chunks.append("\n".join(current))
+
+        elements = []
+        for chunk in chunks:
+            elements.append({"tag": "markdown", "content": chunk})
+            elements.append({"tag": "hr"})
+        if elements and elements[-1]["tag"] == "hr":
+            elements.pop()
+
+        card = {
+            "schema": "2.0",
+            "header": {
+                "title": {"content": title, "tag": "plain_text"},
+                "template": "blue",
+            },
+            "body": {"elements": elements},
+        }
+        return self._send("interactive", json.dumps(card))
 
     def send_card(self, card: dict[str, Any]) -> dict[str, Any]:
         return self._send("interactive", json.dumps(card))
@@ -49,6 +95,33 @@ class FeishuChannel(BaseChannel):
                 return result
             time.sleep(2)
         return "TIMEOUT"
+
+    def send_approval_card(self, request_id: str, action: str, details: str) -> dict[str, Any]:
+        card = {
+            "schema": "2.0",
+            "header": {"title": {"content": f"审批: {action}", "tag": "plain_text"}, "template": "orange"},
+            "body": {"elements": [
+                {"tag": "markdown", "content": f"**操作**: {action}\n\n{details}"},
+                {"tag": "column_set", "columns": [
+                    {"tag": "column", "width": "weighted", "weight": 1, "elements": [
+                        {"tag": "button", "text": {"tag": "plain_text", "content": "✅ 批准"}, "type": "primary",
+                         "behaviors": [{"type": "callback", "value": {"request_id": request_id, "decision": "approve"}}]},
+                    ]},
+                    {"tag": "column", "width": "weighted", "weight": 1, "elements": [
+                        {"tag": "button", "text": {"tag": "plain_text", "content": "❌ 拒绝"}, "type": "danger",
+                         "behaviors": [{"type": "callback", "value": {"request_id": request_id, "decision": "reject"}}]},
+                    ]},
+                ]},
+            ]},
+        }
+        return self.send_card(card)
+
+    def set_approval_queue(self, queue) -> None:
+        self._approval_queue = queue
+
+    def set_tool_executor(self, executor) -> None:
+        """Set a callback to execute tools when approvals are granted."""
+        self._tool_executor = executor
 
     def _send(self, msg_type: str, content: str) -> dict[str, Any]:
         try:
@@ -85,6 +158,23 @@ class FeishuChannel(BaseChannel):
                 msg_id = getattr(context, "open_message_id", "") if context else ""
                 if msg_id:
                     threading.Thread(target=self._patch_card, args=(msg_id, decision, request_id), daemon=True).start()
+
+                if decision == "approve" and self._approval_queue:
+                    pending = self._approval_queue.get(request_id)
+                    if pending and pending["tool_name"]:
+                        self._approval_queue.resolve(request_id, "APPROVED")
+                        if self._tool_executor:
+                            def execute(p=pending):
+                                try:
+                                    result = self._tool_executor(p["tool_name"], json.loads(p["tool_args"]))
+                                    logger.info(f"Approved action executed: {p['tool_name']} → {str(result)[:100]}")
+                                    self.send_text(f"✅ 已执行: {p['action']}\n结果: {str(result)[:500]}")
+                                except Exception as exc:
+                                    logger.error(f"Failed to execute approved action: {exc}")
+                                    self.send_text(f"❌ 执行失败: {p['action']}\n错误: {exc}")
+                            threading.Thread(target=execute, daemon=True).start()
+                elif decision == "reject" and self._approval_queue:
+                    self._approval_queue.resolve(request_id, "REJECTED")
         except Exception as exc:
             logger.error(f"Card callback error: {exc}")
         return resp

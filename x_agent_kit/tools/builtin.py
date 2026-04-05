@@ -1,4 +1,5 @@
 from __future__ import annotations
+import json
 from typing import Any, Callable
 from x_agent_kit.tools.base import tool
 
@@ -68,19 +69,34 @@ def create_notify_tool(channels: dict) -> Callable:
         return result.get("ok", False)
     return notify
 
-def create_request_approval_tool(channels: dict) -> Callable:
-    @tool("Request human approval before executing an action. Blocks until approved or rejected.")
-    def request_approval(action: str, details: str, channel: str = "default") -> str:
+def create_request_approval_tool(channels: dict, approval_queue=None) -> Callable:
+    @tool("Submit an action for human approval. Does NOT block — the action will be executed when approved.")
+    def request_approval(action: str, details: str, tool_name: str = "", tool_args: str = "") -> str:
         """
         Args:
             action: Short description of what needs approval
             details: Full details of the proposed action
-            channel: Channel name (default: 'default')
+            tool_name: Name of the tool to execute when approved (e.g. 'pause_campaign')
+            tool_args: JSON string of arguments to pass to the tool (e.g. '{"campaign_resource": "xxx"}')
         Returns:
-            'APPROVED' or 'REJECTED' or 'TIMEOUT'
+            Confirmation that approval request was sent
         """
-        ch = channels.get(channel, channels.get("default"))
+        import uuid
+        request_id = str(uuid.uuid4())
+
+        # Save to queue if available
+        if approval_queue is not None and tool_name:
+            try:
+                args_dict = json.loads(tool_args) if isinstance(tool_args, str) and tool_args else {}
+            except json.JSONDecodeError:
+                args_dict = {}
+            approval_queue.add(request_id, action, details, tool_name, args_dict)
+
+        ch = channels.get("default")
         if ch is None:
-            return "REJECTED"
-        return ch.request_approval(action, details)
+            return f"Approval queued: {request_id} (no channel)"
+
+        # Send approval card
+        ch.send_approval_card(request_id, action, details)
+        return f"Approval request sent: {request_id}. Action '{tool_name}' will execute when approved."
     return request_approval
