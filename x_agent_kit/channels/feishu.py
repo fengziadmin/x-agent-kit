@@ -23,6 +23,8 @@ class FeishuChannel(BaseChannel):
         self._ws_started = False
         self._approval_queue = None
         self._tool_executor = None
+        self._plan_manager = None
+        self._message_handler = None
 
     def send_text(self, text: str) -> dict[str, Any]:
         # If text contains markdown, send as card for proper rendering
@@ -114,6 +116,12 @@ class FeishuChannel(BaseChannel):
         """Set a callback to execute tools when approvals are granted."""
         self._tool_executor = executor
 
+    def set_plan_manager(self, plan_manager) -> None:
+        self._plan_manager = plan_manager
+
+    def set_message_handler(self, handler) -> None:
+        self._message_handler = handler
+
     def _send(self, msg_type: str, content: str) -> dict[str, Any]:
         try:
             request = CreateMessageRequest.builder().receive_id_type("chat_id").request_body(CreateMessageRequestBody.builder().receive_id(self._chat_id).msg_type(msg_type).content(content).build()).build()
@@ -127,11 +135,42 @@ class FeishuChannel(BaseChannel):
     def _ensure_ws(self) -> None:
         if self._ws_started:
             return
-        handler = lark.EventDispatcherHandler.builder("", "").register_p2_card_action_trigger(self._on_card_action).build()
+        builder = lark.EventDispatcherHandler.builder("", "")
+        builder = builder.register_p2_card_action_trigger(self._on_card_action)
+        if self._message_handler:
+            from lark_oapi.event.im.v1 import P2ImMessageReceiveV1
+            builder = builder.register_p2_im_message_receive_v1(self._on_message_receive)
+        handler = builder.build()
         ws = lark.ws.Client(app_id=self._app_id, app_secret=self._app_secret, event_handler=handler, log_level=lark.LogLevel.ERROR, auto_reconnect=True)
         threading.Thread(target=ws.start, daemon=True).start()
         self._ws_started = True
         time.sleep(2)
+
+    def _on_message_receive(self, event) -> None:
+        """Handle incoming Feishu messages."""
+        try:
+            msg = event.event.message
+            sender = event.event.sender
+            sender_type = getattr(sender, "sender_type", "")
+            if sender_type == "app":
+                return  # Ignore bot's own messages
+            msg_type = getattr(msg, "message_type", "")
+            if msg_type != "text":
+                return  # Only handle text messages
+            chat_id = getattr(msg, "chat_id", "")
+            content_str = getattr(msg, "content", "{}")
+            try:
+                content = json.loads(content_str)
+                text = content.get("text", "")
+            except (json.JSONDecodeError, AttributeError):
+                text = str(content_str)
+            if not text.strip():
+                return
+            text = text.strip()
+            if self._message_handler:
+                self._message_handler(chat_id, text)
+        except Exception as exc:
+            logger.error(f"Message receive error: {exc}")
 
     def _on_card_action(self, trigger: P2CardActionTrigger) -> P2CardActionTriggerResponse:
         resp = P2CardActionTriggerResponse()
@@ -139,14 +178,34 @@ class FeishuChannel(BaseChannel):
             event = trigger.event
             action = getattr(event, "action", None)
             value = getattr(action, "value", {}) if action else {}
-            request_id = value.get("request_id", "")
             decision = value.get("decision", "")
+            plan_id = value.get("plan_id", "")
+            step_id = value.get("step_id", "")
+            context = getattr(event, "context", None)
+            msg_id = getattr(context, "open_message_id", "") if context else ""
+
+            # --- Plan step approval path ---
+            if plan_id and step_id and self._plan_manager:
+                new_status = "approved" if decision == "approve" else "rejected"
+                self._plan_manager.update_step_status(plan_id, step_id, new_status)
+                self._plan_manager.refresh_plan_status(plan_id)
+                if msg_id:
+                    threading.Thread(
+                        target=self._patch_plan_step_card, args=(msg_id, decision, plan_id, step_id), daemon=True
+                    ).start()
+                if decision == "reject" and self._message_handler:
+                    try:
+                        self._message_handler(plan_id, step_id, "reject")
+                    except Exception as exc:
+                        logger.error(f"Message handler error on plan step rejection: {exc}")
+                return resp
+
+            # --- Legacy single-action approval path ---
+            request_id = value.get("request_id", "")
             if request_id and decision:
                 status = "APPROVED" if decision == "approve" else "REJECTED"
                 _APPROVAL_DIR.mkdir(parents=True, exist_ok=True)
                 (_APPROVAL_DIR / f"{request_id}.json").write_text(json.dumps({"status": status}), encoding="utf-8")
-                context = getattr(event, "context", None)
-                msg_id = getattr(context, "open_message_id", "") if context else ""
                 if msg_id:
                     threading.Thread(target=self._patch_card, args=(msg_id, decision, request_id), daemon=True).start()
 
@@ -159,10 +218,24 @@ class FeishuChannel(BaseChannel):
                                 try:
                                     result = self._tool_executor(p["tool_name"], json.loads(p["tool_args"]))
                                     logger.info(f"Approved action executed: {p['tool_name']} → {str(result)[:100]}")
-                                    self.send_text(f"✅ 已执行: {p['action']}\n结果: {str(result)[:500]}")
+                                    card = {
+                                        "schema": "2.0",
+                                        "header": {"title": {"content": "✅ 执行成功", "tag": "plain_text"}, "template": "green"},
+                                        "body": {"elements": [
+                                            {"tag": "markdown", "content": f"**操作**: {p['action']}\n**结果**: {str(result)[:500]}"},
+                                        ]},
+                                    }
+                                    self.send_card(card)
                                 except Exception as exc:
                                     logger.error(f"Failed to execute approved action: {exc}")
-                                    self.send_text(f"❌ 执行失败: {p['action']}\n错误: {exc}")
+                                    card = {
+                                        "schema": "2.0",
+                                        "header": {"title": {"content": "❌ 执行失败", "tag": "plain_text"}, "template": "red"},
+                                        "body": {"elements": [
+                                            {"tag": "markdown", "content": f"**操作**: {p['action']}\n**错误**: {str(exc)[:500]}"},
+                                        ]},
+                                    }
+                                    self.send_card(card)
                             threading.Thread(target=execute, daemon=True).start()
                 elif decision == "reject" and self._approval_queue:
                     self._approval_queue.resolve(request_id, "REJECTED")
@@ -170,12 +243,44 @@ class FeishuChannel(BaseChannel):
             logger.error(f"Card callback error: {exc}")
         return resp
 
+    def _patch_plan_step_card(self, message_id: str, decision: str, plan_id: str, step_id: str) -> None:
+        time.sleep(1)
+        if decision == "approve":
+            title = "✅ 步骤已批准"
+            color = "green"
+            content = f"计划 `{plan_id[:8]}...` 步骤 `{step_id[:8]}...` 已批准，等待执行..."
+        else:
+            title = "❌ 步骤已拒绝"
+            color = "red"
+            content = f"计划 `{plan_id[:8]}...` 步骤 `{step_id[:8]}...` 已拒绝。"
+
+        card = {
+            "schema": "2.0",
+            "header": {"title": {"content": title, "tag": "plain_text"}, "template": color},
+            "body": {"elements": [{"tag": "markdown", "content": content}]},
+        }
+        try:
+            req = PatchMessageRequest.builder().message_id(message_id).request_body(PatchMessageRequestBody.builder().content(json.dumps(card)).build()).build()
+            self._client.im.v1.message.patch(req)
+        except Exception as exc:
+            logger.error(f"Patch plan step card failed: {exc}")
+
     def _patch_card(self, message_id: str, decision: str, request_id: str) -> None:
         time.sleep(1)
-        status = "complete" if decision == "approve" else "error"
-        title = "✅ 已批准" if decision == "approve" else "❌ 已拒绝"
-        action_text = "正在执行..." if decision == "approve" else "操作已取消"
-        card = build_status_card(title, status, "green" if decision == "approve" else "red", f"审批请求 `{request_id[:8]}...` {title}，{action_text}")
+        if decision == "approve":
+            title = "✅ 已批准"
+            color = "green"
+            content = f"审批 `{request_id[:8]}...` 已批准，正在执行..."
+        else:
+            title = "❌ 已拒绝"
+            color = "red"
+            content = f"审批 `{request_id[:8]}...` 已拒绝，操作已取消。"
+
+        card = {
+            "schema": "2.0",
+            "header": {"title": {"content": title, "tag": "plain_text"}, "template": color},
+            "body": {"elements": [{"tag": "markdown", "content": content}]},
+        }
         try:
             req = PatchMessageRequest.builder().message_id(message_id).request_body(PatchMessageRequestBody.builder().content(json.dumps(card)).build()).build()
             self._client.im.v1.message.patch(req)
