@@ -83,13 +83,15 @@ class PlanManager:
         plan_steps = []
         for i, s in enumerate(steps):
             step_id = str(uuid.uuid4())
+            priority = s.get("priority", "medium")
+            risk_level = s.get("risk_level", "medium")
             self._conn.execute(
                 "INSERT INTO plan_steps (step_id, plan_id, action, tool_name, tool_args, priority, risk_level, status, step_order) VALUES (?, ?, ?, ?, ?, ?, ?, 'pending', ?)",
-                (step_id, plan_id, s["action"], s["tool_name"], json.dumps(s["tool_args"], ensure_ascii=False), s["priority"], s["risk_level"], i),
+                (step_id, plan_id, s["action"], s["tool_name"], json.dumps(s["tool_args"], ensure_ascii=False), priority, risk_level, i),
             )
             plan_steps.append(PlanStep(
                 step_id=step_id, action=s["action"], tool_name=s["tool_name"],
-                tool_args=s["tool_args"], priority=s["priority"], risk_level=s["risk_level"],
+                tool_args=s["tool_args"], priority=priority, risk_level=risk_level,
             ))
         self._conn.commit()
         logger.info(f"Plan created: {plan_id} ({title}) with {len(steps)} steps")
