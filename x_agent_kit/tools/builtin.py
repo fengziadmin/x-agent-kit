@@ -100,3 +100,177 @@ def create_request_approval_tool(channels: dict, approval_queue=None) -> Callabl
         ch.send_approval_card(request_id, action, details)
         return f"Approval request sent: {request_id}. Action '{tool_name}' will execute when approved."
     return request_approval
+
+
+# ---------------------------------------------------------------------------
+# Plan tools
+# ---------------------------------------------------------------------------
+
+def create_plan_tool(plan_manager) -> Callable:
+    @tool("Create a structured execution plan from a list of steps. Returns the plan ID.")
+    def create_plan(title: str, summary: str, plan_type: str, steps: str) -> str:
+        """
+        Args:
+            title: Plan title
+            summary: Brief description of the plan
+            plan_type: One of 'daily', 'weekly', 'monthly'
+            steps: JSON array of step objects, each with keys: action, tool_name, tool_args, priority, risk_level
+        """
+        parsed_steps = json.loads(steps)
+        plan = plan_manager.create(title, summary, plan_type, parsed_steps)
+        return json.dumps({"plan_id": plan.plan_id, "steps_count": len(plan.steps)})
+    return create_plan
+
+
+def create_submit_plan_tool(plan_manager, channels: dict) -> Callable:
+    @tool("Submit a plan for human approval via Feishu. Sends an interactive approval card.")
+    def submit_plan(plan_id: str) -> str:
+        """
+        Args:
+            plan_id: The plan ID to submit for approval
+        """
+        from x_agent_kit.channels.feishu_cards import build_plan_approval_card
+
+        plan = plan_manager.get(plan_id)
+        if plan is None:
+            return json.dumps({"error": f"Plan {plan_id} not found"})
+
+        card = build_plan_approval_card(plan)
+        ch = channels.get("default")
+        if ch is None:
+            return json.dumps({"error": "No default channel configured"})
+
+        ch.send_card(card)
+        plan_manager._conn.execute(
+            "UPDATE plans SET status = 'pending_approval' WHERE plan_id = ?", (plan_id,)
+        )
+        plan_manager._conn.commit()
+        return json.dumps({"status": "submitted", "plan_id": plan_id})
+    return submit_plan
+
+
+def create_get_plan_tool(plan_manager) -> Callable:
+    @tool("Get the current status of a plan and all its steps as JSON.")
+    def get_plan(plan_id: str) -> str:
+        """
+        Args:
+            plan_id: The plan ID to retrieve
+        """
+        plan = plan_manager.get(plan_id)
+        if plan is None:
+            return json.dumps({"error": f"Plan {plan_id} not found"})
+        return json.dumps({
+            "plan_id": plan.plan_id,
+            "title": plan.title,
+            "summary": plan.summary,
+            "plan_type": plan.plan_type,
+            "status": plan.status,
+            "created_at": plan.created_at,
+            "resolved_at": plan.resolved_at,
+            "steps": [
+                {
+                    "step_id": s.step_id,
+                    "action": s.action,
+                    "tool_name": s.tool_name,
+                    "tool_args": s.tool_args,
+                    "priority": s.priority,
+                    "risk_level": s.risk_level,
+                    "status": s.status,
+                    "rejection_note": s.rejection_note,
+                    "execution_result": s.execution_result,
+                }
+                for s in plan.steps
+            ],
+        }, ensure_ascii=False)
+    return get_plan
+
+
+def create_execute_approved_steps_tool(plan_manager, tool_executor, channels: dict) -> Callable:
+    @tool("Execute all approved steps in a plan. Skips non-approved steps. Reports results via Feishu card.")
+    def execute_approved_steps(plan_id: str) -> str:
+        """
+        Args:
+            plan_id: The plan ID whose approved steps should be executed
+        """
+        from x_agent_kit.channels.feishu_cards import build_step_result_card
+
+        plan = plan_manager.get(plan_id)
+        if plan is None:
+            return json.dumps({"error": f"Plan {plan_id} not found"})
+
+        executed = 0
+        failed = 0
+        for step in plan.steps:
+            if step.status != "approved":
+                continue
+            result_text = ""
+            try:
+                result = tool_executor(step.tool_name, step.tool_args)
+                result_text = str(result)
+                plan_manager.set_step_result(plan_id, step.step_id, result_text)
+                executed += 1
+            except Exception as exc:
+                result_text = str(exc)
+                plan_manager.update_step_status(plan_id, step.step_id, "failed", note=result_text)
+                failed += 1
+
+            # Send result card
+            ch = channels.get("default")
+            if ch is not None:
+                updated_plan = plan_manager.get(plan_id)
+                updated_step = next((s for s in updated_plan.steps if s.step_id == step.step_id), None)
+                if updated_step:
+                    card = build_step_result_card(updated_step, result_text)
+                    ch.send_card(card)
+
+        plan_manager.refresh_plan_status(plan_id)
+        return json.dumps({"executed": executed, "failed": failed, "plan_id": plan_id})
+    return execute_approved_steps
+
+
+def create_update_step_tool(plan_manager) -> Callable:
+    @tool("Update a plan step's action, tool, or arguments after negotiation.")
+    def update_step(plan_id: str, step_id: str, new_action: str, new_tool_name: str, new_tool_args: str = "{}") -> str:
+        """
+        Args:
+            plan_id: The plan ID containing the step
+            step_id: The step ID to update
+            new_action: Updated action description
+            new_tool_name: Updated tool name
+            new_tool_args: Updated tool arguments as JSON string
+        """
+        args_dict = json.loads(new_tool_args)
+        plan_manager.update_step_action(plan_id, step_id, new_action, new_tool_name, args_dict)
+        return json.dumps({"status": "updated", "step_id": step_id})
+    return update_step
+
+
+def create_resubmit_step_tool(plan_manager, channels: dict) -> Callable:
+    @tool("Resubmit a rejected step for re-approval after modification. Sends a negotiation card.")
+    def resubmit_step(plan_id: str, step_id: str) -> str:
+        """
+        Args:
+            plan_id: The plan ID containing the step
+            step_id: The step ID to resubmit
+        """
+        from x_agent_kit.channels.feishu_cards import build_negotiation_card
+
+        plan = plan_manager.get(plan_id)
+        if plan is None:
+            return json.dumps({"error": f"Plan {plan_id} not found"})
+
+        step = next((s for s in plan.steps if s.step_id == step_id), None)
+        if step is None:
+            return json.dumps({"error": f"Step {step_id} not found"})
+
+        # Reset status to pending
+        plan_manager.update_step_status(plan_id, step_id, "pending")
+
+        # Send negotiation card
+        ch = channels.get("default")
+        if ch is not None:
+            card = build_negotiation_card(step, step.action)
+            ch.send_card(card)
+
+        return json.dumps({"status": "resubmitted", "step_id": step_id})
+    return resubmit_step
