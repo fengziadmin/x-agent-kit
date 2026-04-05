@@ -12,10 +12,29 @@ def create_save_memory_tool(memory) -> Callable:
 
 
 def create_recall_memories_tool(memory) -> Callable:
-    @tool("Recall all saved memories from previous sessions.")
+    @tool("Recall recent memories from previous sessions. Use search_memory for specific topics.")
     def recall_memories() -> str:
         return memory.summary()
     return recall_memories
+
+
+def create_search_memory_tool(memory) -> Callable:
+    @tool("Search past memories by keyword. Use this to find specific information from previous sessions.")
+    def search_memory(query: str, limit: int = 5) -> str:
+        """
+        Args:
+            query: Keywords to search for in memories
+            limit: Max number of results (default 5)
+        """
+        results = memory.search(query, limit)
+        if not results:
+            return f"No memories found matching '{query}'."
+        parts = []
+        for r in results:
+            parts.append(f"**[{r['timestamp'][:16]}] {r['key']}**\n{r['content'][:500]}")
+        return "\n\n".join(parts)
+    return search_memory
+
 
 def create_load_skill_tool(loader) -> Callable:
     @tool("Load a skill (domain knowledge) by name. Call this when you need specialized expertise.")

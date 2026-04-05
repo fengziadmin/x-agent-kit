@@ -4,7 +4,7 @@ from loguru import logger
 from x_agent_kit.config import Config, load_config
 from x_agent_kit.models import BrainResponse, Message
 from x_agent_kit.skills.loader import SkillLoader
-from x_agent_kit.tools.builtin import create_list_skills_tool, create_load_skill_tool, create_notify_tool, create_request_approval_tool, create_save_memory_tool, create_recall_memories_tool
+from x_agent_kit.tools.builtin import create_list_skills_tool, create_load_skill_tool, create_notify_tool, create_request_approval_tool, create_save_memory_tool, create_recall_memories_tool, create_search_memory_tool
 from x_agent_kit.tools.registry import ToolRegistry
 
 def create_brain(config: Config):
@@ -61,6 +61,7 @@ class Agent:
             self._memory = Memory(memory_dir=self._config.memory.dir)
             self._tools.register(create_save_memory_tool(self._memory))
             self._tools.register(create_recall_memories_tool(self._memory))
+            self._tools.register(create_search_memory_tool(self._memory))
 
     def register_tools(self, tools: list) -> None:
         for t in tools:
@@ -74,6 +75,9 @@ class Agent:
             task_with_memory = task
         messages = [Message(role="user", content=task_with_memory)]
         max_iter = self._config.agent.max_iterations
+        notified = False
+        memory_saved = False
+
         for i in range(max_iter):
             logger.info(f"Agent iteration {i+1}/{max_iter}")
             response = self._brain.think(messages=messages, tools=self._tools.schemas())
@@ -81,9 +85,29 @@ class Agent:
                 return response.text or ""
             if response.tool_calls:
                 for call in response.tool_calls:
+                    # Prevent duplicate notify calls
+                    if call.name == "notify":
+                        if notified:
+                            logger.info("Skipping duplicate notify call")
+                            messages.append(Message(
+                                role="tool_result", content="Already sent. Do not notify again.",
+                                tool_call_id=call.name,
+                            ))
+                            continue
+                        notified = True
+
                     logger.info(f"Tool call: {call.name}({call.arguments})")
                     result = self._tools.execute(call.name, call.arguments)
                     messages.append(Message(role="tool_result", content=str(result), tool_call_id=call.name))
+
+                    # Auto-stop after save_memory (it's the last step)
+                    if call.name == "save_memory":
+                        memory_saved = True
+
+            if memory_saved:
+                logger.info("Memory saved, stopping agent loop")
+                return response.text or "Task complete."
+
             if response.text:
                 messages.append(Message(role="assistant", content=response.text))
         return "Max iterations reached"
