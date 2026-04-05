@@ -2,6 +2,21 @@ from __future__ import annotations
 from typing import Any, Callable
 from x_agent_kit.tools.base import tool
 
+
+def create_save_memory_tool(memory) -> Callable:
+    @tool("Save important information to persistent memory for future sessions.")
+    def save_memory(key: str, content: str) -> str:
+        memory.save(key, content)
+        return f"Memory saved: {key}"
+    return save_memory
+
+
+def create_recall_memories_tool(memory) -> Callable:
+    @tool("Recall all saved memories from previous sessions.")
+    def recall_memories() -> str:
+        return memory.summary()
+    return recall_memories
+
 def create_load_skill_tool(loader) -> Callable:
     @tool("Load a skill (domain knowledge) by name. Call this when you need specialized expertise.")
     def load_skill(name: str) -> str:

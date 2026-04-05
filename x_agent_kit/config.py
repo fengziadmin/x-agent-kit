@@ -37,12 +37,26 @@ class AgentConfig:
 
 
 @dataclass
+class MemoryConfig:
+    enabled: bool = True
+    dir: str = ".agent/memory"
+
+
+@dataclass
+class ScheduleConfig:
+    cron: str
+    task: str
+
+
+@dataclass
 class Config:
     brain: BrainConfig
     providers: dict[str, ProviderConfig]
     channels: dict[str, Any]
     skills: SkillsConfig
     agent: AgentConfig
+    memory: MemoryConfig = field(default_factory=MemoryConfig)
+    schedules: list[ScheduleConfig] = field(default_factory=list)
 
 
 def load_config(config_dir: str) -> Config:
@@ -62,4 +76,22 @@ def load_config(config_dir: str) -> Config:
     agent_raw = raw.get("agent", {})
     agent = AgentConfig(**agent_raw)
 
-    return Config(brain=brain, providers=providers, channels=channels, skills=skills, agent=agent)
+    memory_raw = raw.get("memory", {})
+    memory = MemoryConfig(
+        enabled=memory_raw.get("enabled", True),
+        dir=memory_raw.get("dir", ".agent/memory"),
+    )
+
+    schedules = []
+    for s in raw.get("schedules", []):
+        schedules.append(ScheduleConfig(cron=s["cron"], task=s["task"]))
+
+    return Config(
+        brain=brain,
+        providers=providers,
+        channels=channels,
+        skills=skills,
+        agent=agent,
+        memory=memory,
+        schedules=schedules,
+    )

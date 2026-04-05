@@ -48,3 +48,16 @@ class TestLoadConfig:
         config = load_config(str(FIXTURES / ".agent"))
         assert config.providers["gemini"].resolve_api_key() == "test-key-123"
         del os.environ["GOOGLE_API_KEY"]
+
+    def test_loads_schedules(self):
+        from x_agent_kit.config import load_config
+        config = load_config(str(FIXTURES / ".agent"))
+        assert len(config.schedules) == 2
+        assert config.schedules[0].cron == "0 9 * * *"
+        assert config.schedules[0].task == "Daily analysis task"
+
+    def test_loads_memory_config(self):
+        from x_agent_kit.config import load_config
+        config = load_config(str(FIXTURES / ".agent"))
+        assert config.memory.enabled is True
+        assert config.memory.dir == ".agent/memory"

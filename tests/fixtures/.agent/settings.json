@@ -13,5 +13,13 @@
     "feishu": { "app_id_env": "LARK_APP_ID", "app_secret_env": "LARK_APP_SECRET", "default_chat_id_env": "LARK_CHAT_ID" }
   },
   "skills": { "paths": [".agent/skills"] },
-  "agent": { "max_iterations": 50, "approval_timeout": 3600 }
+  "agent": { "max_iterations": 50, "approval_timeout": 3600 },
+  "memory": {
+    "enabled": true,
+    "dir": ".agent/memory"
+  },
+  "schedules": [
+    {"cron": "0 9 * * *", "task": "Daily analysis task"},
+    {"cron": "0 */6 * * *", "task": "Periodic check task"}
+  ]
 }

@@ -4,7 +4,7 @@ from loguru import logger
 from x_agent_kit.config import Config, load_config
 from x_agent_kit.models import BrainResponse, Message
 from x_agent_kit.skills.loader import SkillLoader
-from x_agent_kit.tools.builtin import create_list_skills_tool, create_load_skill_tool, create_notify_tool, create_request_approval_tool
+from x_agent_kit.tools.builtin import create_list_skills_tool, create_load_skill_tool, create_notify_tool, create_request_approval_tool, create_save_memory_tool, create_recall_memories_tool
 from x_agent_kit.tools.registry import ToolRegistry
 
 def create_brain(config: Config):
@@ -55,12 +55,24 @@ class Agent:
         self._tools.register(create_notify_tool(self._channels))
         self._tools.register(create_request_approval_tool(self._channels))
 
+        self._memory = None
+        if self._config.memory.enabled:
+            from x_agent_kit.memory import Memory
+            self._memory = Memory(memory_dir=self._config.memory.dir)
+            self._tools.register(create_save_memory_tool(self._memory))
+            self._tools.register(create_recall_memories_tool(self._memory))
+
     def register_tools(self, tools: list) -> None:
         for t in tools:
             self._tools.register(t)
 
     def run(self, task: str) -> str:
-        messages = [Message(role="user", content=task)]
+        if self._memory is not None:
+            mem_summary = self._memory.summary()
+            task_with_memory = f"{mem_summary}\n\n{task}"
+        else:
+            task_with_memory = task
+        messages = [Message(role="user", content=task_with_memory)]
         max_iter = self._config.agent.max_iterations
         for i in range(max_iter):
             logger.info(f"Agent iteration {i+1}/{max_iter}")
@@ -76,8 +88,14 @@ class Agent:
                 messages.append(Message(role="assistant", content=response.text))
         return "Max iterations reached"
 
-    def serve(self, cron: str, task: str) -> None:
+    def serve(self, schedules: list | None = None) -> None:
+        """Start scheduled agent. If schedules not provided, reads from config."""
         from x_agent_kit.scheduler import Scheduler
         sched = Scheduler()
-        sched.add(cron, lambda: self.run(task))
+        items = schedules or self._config.schedules
+        for s in items:
+            cron_expr = s.cron if hasattr(s, 'cron') else s['cron']
+            task_str = s.task if hasattr(s, 'task') else s['task']
+            logger.info(f"Schedule: {cron_expr} -> {task_str[:50]}...")
+            sched.add(cron_expr, lambda t=task_str: self.run(t))
         sched.start()
