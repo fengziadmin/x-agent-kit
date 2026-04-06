@@ -11,6 +11,7 @@ from lark_oapi.event.callback.model.p2_card_action_trigger import P2CardActionTr
 from loguru import logger
 from x_agent_kit.channels.base import BaseChannel
 from x_agent_kit.channels.feishu_cards import StreamingCard, build_confirmation_card, build_status_card
+from x_agent_kit.i18n import t
 
 _APPROVAL_DIR = Path("/tmp/x-agent-approvals")
 
@@ -36,7 +37,7 @@ class FeishuChannel(BaseChannel):
     def _send_markdown_card(self, text: str) -> dict[str, Any]:
         """Send long markdown text as a card, split into chunks if needed."""
         # Extract title from first ## heading if present
-        title = "Agent Report"
+        title = t("card.agent_report")
         lines = text.split("\n")
         for line in lines:
             if line.startswith("## "):
@@ -82,12 +83,12 @@ class FeishuChannel(BaseChannel):
         request_id = str(uuid.uuid4())
         card = {
             "schema": "2.0",
-            "header": {"title": {"content": f"审批: {action}", "tag": "plain_text"}, "template": "orange"},
+            "header": {"title": {"content": t("card.approval_title", action=action), "tag": "plain_text"}, "template": "orange"},
             "body": {"elements": [
-                {"tag": "markdown", "content": f"**操作**: {action}\n\n{details}"},
+                {"tag": "markdown", "content": f"**{t('card.operation')}**: {action}\n\n{details}"},
                 {"tag": "column_set", "columns": [
-                    {"tag": "column", "width": "weighted", "weight": 1, "elements": [{"tag": "button", "text": {"tag": "plain_text", "content": "Approve"}, "type": "primary", "behaviors": [{"type": "callback", "value": {"request_id": request_id, "decision": "approve"}}]}]},
-                    {"tag": "column", "width": "weighted", "weight": 1, "elements": [{"tag": "button", "text": {"tag": "plain_text", "content": "Reject"}, "type": "danger", "behaviors": [{"type": "callback", "value": {"request_id": request_id, "decision": "reject"}}]}]},
+                    {"tag": "column", "width": "weighted", "weight": 1, "elements": [{"tag": "button", "text": {"tag": "plain_text", "content": t("card.approve")}, "type": "primary", "behaviors": [{"type": "callback", "value": {"request_id": request_id, "decision": "approve"}}]}]},
+                    {"tag": "column", "width": "weighted", "weight": 1, "elements": [{"tag": "button", "text": {"tag": "plain_text", "content": t("card.reject")}, "type": "danger", "behaviors": [{"type": "callback", "value": {"request_id": request_id, "decision": "reject"}}]}]},
                 ]},
             ]},
         }
@@ -104,8 +105,10 @@ class FeishuChannel(BaseChannel):
         card = build_confirmation_card(request_id, action, details)
         return self.send_card(card)
 
-    def send_streaming_start(self, title: str = "🤔 分析中...") -> StreamingCard:
+    def send_streaming_start(self, title: str = "") -> StreamingCard:
         """Create and send a streaming card. Returns StreamingCard for updates."""
+        if not title:
+            title = t("agent.thinking")
         card = StreamingCard(self._client, self._chat_id)
         card.start(title)
         return card
@@ -337,9 +340,9 @@ class FeishuChannel(BaseChannel):
                                     logger.info(f"Approved action executed: {p['tool_name']} → {str(result)[:100]}")
                                     card = {
                                         "schema": "2.0",
-                                        "header": {"title": {"content": "✅ 执行成功", "tag": "plain_text"}, "template": "green"},
+                                        "header": {"title": {"content": t("card.exec_success"), "tag": "plain_text"}, "template": "green"},
                                         "body": {"elements": [
-                                            {"tag": "markdown", "content": f"**操作**: {p['action']}\n**结果**: {str(result)[:500]}"},
+                                            {"tag": "markdown", "content": f"**{t('card.operation')}**: {p['action']}\n**{t('card.result')}**: {str(result)[:500]}"},
                                         ]},
                                     }
                                     self.send_card(card)
@@ -347,9 +350,9 @@ class FeishuChannel(BaseChannel):
                                     logger.error(f"Failed to execute approved action: {exc}")
                                     card = {
                                         "schema": "2.0",
-                                        "header": {"title": {"content": "❌ 执行失败", "tag": "plain_text"}, "template": "red"},
+                                        "header": {"title": {"content": t("card.exec_failed"), "tag": "plain_text"}, "template": "red"},
                                         "body": {"elements": [
-                                            {"tag": "markdown", "content": f"**操作**: {p['action']}\n**错误**: {str(exc)[:500]}"},
+                                            {"tag": "markdown", "content": f"**{t('card.operation')}**: {p['action']}\n**{t('card.error')}**: {str(exc)[:500]}"},
                                         ]},
                                     }
                                     self.send_card(card)
@@ -386,13 +389,13 @@ class FeishuChannel(BaseChannel):
     def _patch_card(self, message_id: str, decision: str, request_id: str) -> None:
         time.sleep(1)
         if decision == "approve":
-            title = "✅ 已批准"
+            title = t("card.approved")
             color = "green"
-            content = f"审批 `{request_id[:8]}...` 已批准，正在执行..."
+            content = t("card.approval_approved", id=request_id[:8])
         else:
-            title = "❌ 已拒绝"
+            title = t("card.rejected")
             color = "red"
-            content = f"审批 `{request_id[:8]}...` 已拒绝，操作已取消。"
+            content = t("card.approval_rejected", id=request_id[:8])
 
         card = {
             "schema": "2.0",
