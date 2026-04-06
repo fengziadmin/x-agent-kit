@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "x-agent-kit"
-version = "0.1.0"
+version = "0.2.0"
 description = "Build autonomous AI agents with pluggable brains, tools, skills, and channels"
 requires-python = ">=3.11"
 dependencies = [
@@ -16,7 +16,7 @@ dependencies = [
 [project.optional-dependencies]
 gemini = ["google-genai>=1.0.0"]
 openai = ["openai>=1.0.0"]
-feishu = ["lark-oapi>=1.5.0"]
+feishu = ["lark-oapi>=1.5.0", "requests>=2.31.0"]
 all = ["x-agent-kit[gemini,openai,feishu]"]
 dev = ["pytest>=8.0.0", "pytest-mock>=3.12.0"]
 
