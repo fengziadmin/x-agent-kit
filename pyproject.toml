@@ -26,3 +26,6 @@ testpaths = ["tests"]
 [tool.setuptools.packages.find]
 where = ["."]
 include = ["x_agent_kit*"]
+
+[tool.setuptools.package-data]
+"x_agent_kit.i18n" = ["*.json"]
