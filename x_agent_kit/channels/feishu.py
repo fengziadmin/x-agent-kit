@@ -175,6 +175,7 @@ class FeishuChannel(BaseChannel):
     def _ensure_ws(self) -> None:
         if self._ws_started:
             return
+        self._ws_start_time = int(time.time() * 1000)  # ms timestamp, ignore messages before this
         builder = lark.EventDispatcherHandler.builder("", "")
         builder = builder.register_p2_card_action_trigger(self._on_card_action)
         if self._message_handler:
@@ -195,6 +196,14 @@ class FeishuChannel(BaseChannel):
                 return
             msg_type = getattr(msg, "message_type", "")
             if msg_type != "text":
+                return
+            # Ignore messages sent before WebSocket started (history replay)
+            create_time = getattr(msg, "create_time", "0")
+            try:
+                msg_ts = int(create_time)
+            except (ValueError, TypeError):
+                msg_ts = 0
+            if msg_ts and hasattr(self, "_ws_start_time") and msg_ts < self._ws_start_time:
                 return
             message_id = getattr(msg, "message_id", "")
             # Deduplicate — Feishu WebSocket may redeliver the same message
