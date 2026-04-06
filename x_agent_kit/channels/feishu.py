@@ -241,11 +241,12 @@ class FeishuChannel(BaseChannel):
                 bot_mentioned = False
                 for m in mentions:
                     m_id = getattr(m, "id", None)
+                    open_id = ""
                     if m_id:
                         open_id = getattr(m_id, "open_id", "") if hasattr(m_id, "open_id") else m_id.get("open_id", "") if isinstance(m_id, dict) else ""
-                        if open_id and bot_open_id and open_id == bot_open_id:
-                            bot_mentioned = True
-                            break
+                    if open_id and bot_open_id and open_id == bot_open_id:
+                        bot_mentioned = True
+                        break
                 if not bot_mentioned:
                     return
             content_str = getattr(msg, "content", "{}")
