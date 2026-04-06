@@ -25,6 +25,7 @@ class FeishuChannel(BaseChannel):
         self._tool_executor = None
         self._plan_manager = None
         self._message_handler = None
+        self._handled_messages: set[str] = set()
 
     def send_text(self, text: str) -> dict[str, Any]:
         # If text contains markdown, send as card for proper rendering
@@ -171,12 +172,19 @@ class FeishuChannel(BaseChannel):
             sender = event.event.sender
             sender_type = getattr(sender, "sender_type", "")
             if sender_type == "app":
-                return  # Ignore bot's own messages
+                return
             msg_type = getattr(msg, "message_type", "")
             if msg_type != "text":
-                return  # Only handle text messages
-            chat_id = getattr(msg, "chat_id", "")
+                return
             message_id = getattr(msg, "message_id", "")
+            # Deduplicate — Feishu WebSocket may redeliver the same message
+            if message_id in self._handled_messages:
+                return
+            self._handled_messages.add(message_id)
+            # Keep set bounded
+            if len(self._handled_messages) > 500:
+                self._handled_messages = set(list(self._handled_messages)[-200:])
+            chat_id = getattr(msg, "chat_id", "")
             content_str = getattr(msg, "content", "{}")
             try:
                 content = json.loads(content_str)
