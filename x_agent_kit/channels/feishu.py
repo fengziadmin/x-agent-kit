@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 import lark_oapi as lark
-from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody, PatchMessageRequest, PatchMessageRequestBody
+from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody, PatchMessageRequest, PatchMessageRequestBody, ReplyMessageRequest, ReplyMessageRequestBody
 from lark_oapi.event.callback.model.p2_card_action_trigger import P2CardActionTrigger, P2CardActionTriggerResponse
 from loguru import logger
 from x_agent_kit.channels.base import BaseChannel
@@ -122,6 +122,20 @@ class FeishuChannel(BaseChannel):
     def set_message_handler(self, handler) -> None:
         self._message_handler = handler
 
+    def reply_text(self, message_id: str, text: str) -> dict[str, Any]:
+        """Reply to a specific message (thread reply)."""
+        try:
+            content = json.dumps({"text": text})
+            req = ReplyMessageRequest.builder().message_id(message_id).request_body(
+                ReplyMessageRequestBody.builder().msg_type("text").content(content).build()
+            ).build()
+            response = self._client.im.v1.message.reply(req)
+            if response.success():
+                return {"ok": True, "message_id": response.data.message_id}
+            return {"error": response.msg}
+        except Exception as exc:
+            return {"error": str(exc)}
+
     def _send(self, msg_type: str, content: str) -> dict[str, Any]:
         try:
             request = CreateMessageRequest.builder().receive_id_type("chat_id").request_body(CreateMessageRequestBody.builder().receive_id(self._chat_id).msg_type(msg_type).content(content).build()).build()
@@ -157,6 +171,7 @@ class FeishuChannel(BaseChannel):
             if msg_type != "text":
                 return  # Only handle text messages
             chat_id = getattr(msg, "chat_id", "")
+            message_id = getattr(msg, "message_id", "")
             content_str = getattr(msg, "content", "{}")
             try:
                 content = json.loads(content_str)
@@ -167,7 +182,7 @@ class FeishuChannel(BaseChannel):
                 return
             text = text.strip()
             if self._message_handler:
-                self._message_handler(chat_id, text)
+                self._message_handler(chat_id, text, message_id)
         except Exception as exc:
             logger.error(f"Message receive error: {exc}")
 

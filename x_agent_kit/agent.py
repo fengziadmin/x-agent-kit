@@ -57,6 +57,7 @@ class Agent:
 
         self._memory = None
         self._approval_queue = None
+        self._reply_mode = False
         if self._config.memory.enabled:
             from x_agent_kit.memory import Memory
             from x_agent_kit.approval_queue import ApprovalQueue
@@ -111,10 +112,11 @@ class Agent:
         notified = False
         memory_saved = False
 
-        # Start streaming card if feishu channel available
+        # Start streaming card if feishu channel available (skip in reply mode)
         streaming_card = None
+        reply_mode = getattr(self, "_reply_mode", False)
         default_ch = self._channels.get("default")
-        if default_ch and hasattr(default_ch, "send_streaming_start"):
+        if default_ch and hasattr(default_ch, "send_streaming_start") and not reply_mode:
             streaming_card = default_ch.send_streaming_start("🤔 Agent 分析中...")
         notify_content = ""
         progress_steps = []  # Human-readable progress
@@ -240,13 +242,23 @@ class Agent:
 
         # Register message handler BEFORE starting WebSocket so it gets registered
         if self._conversation and feishu and hasattr(feishu, 'set_message_handler'):
-            def on_message(chat_id: str, text: str):
+            def on_message(chat_id: str, text: str, message_id: str = ""):
+                logger.info(f"Incoming message from {chat_id}: {text[:50]}...")
                 self._conversation.add_message("user", text, chat_id)
                 ctx = self._conversation.get_context(chat_id)
                 context_str = "\n".join(f"[{m['role']}] {m['content']}" for m in ctx[:-1]) if len(ctx) > 1 else ""
                 task = f"对话上下文:\n{context_str}\n\n用户消息: {text}" if context_str else text
-                result = self.run(task)
+                # Run agent without streaming card (reply mode)
+                self._reply_mode = True
+                try:
+                    result = self.run(task)
+                finally:
+                    self._reply_mode = False
                 self._conversation.add_message("assistant", result, chat_id)
+                # Reply to original message
+                if message_id and hasattr(feishu, 'reply_text'):
+                    feishu.reply_text(message_id, result)
+                    logger.info(f"Replied to message {message_id[:20]}...")
             feishu.set_message_handler(on_message)
             logger.info("Feishu message handler registered for bidirectional comms")
 

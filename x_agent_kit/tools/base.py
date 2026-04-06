@@ -30,7 +30,10 @@ def _extract_parameters(func: Callable) -> dict:
             continue
         param_type = hints.get(param_name, str)
         json_type = _PYTHON_TYPE_TO_JSON.get(param_type, "string")
-        properties[param_name] = {"type": json_type}
+        prop = {"type": json_type}
+        if json_type == "array":
+            prop["items"] = {"type": "string"}
+        properties[param_name] = prop
         if func.__doc__:
             for line in func.__doc__.split("\n"):
                 stripped = line.strip()

@@ -26,9 +26,10 @@ class TestFeishuMessageHandler:
         event.event.message.chat_id = "chat-123"
         event.event.message.message_type = "text"
         event.event.message.content = json.dumps({"text": "查一下 Campaign A 表现"})
+        event.event.message.message_id = "msg-456"
         event.event.sender.sender_type = "user"
         ch._on_message_receive(event)
-        handler.assert_called_once_with("chat-123", "查一下 Campaign A 表现")
+        handler.assert_called_once_with("chat-123", "查一下 Campaign A 表现", "msg-456")
 
     def test_ignores_bot_own_messages(self):
         ch = self._make_feishu_channel()

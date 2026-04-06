@@ -43,7 +43,8 @@ class GeminiBrain(BaseBrain):
     def _parse_response(self, response) -> BrainResponse:
         if not response.candidates:
             return BrainResponse(text="")
-        parts = response.candidates[0].content.parts
+        content = response.candidates[0].content
+        parts = content.parts if content and content.parts else []
         text_parts = []
         tool_calls = []
         for part in parts:
