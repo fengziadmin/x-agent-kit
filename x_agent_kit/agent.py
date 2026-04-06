@@ -256,6 +256,29 @@ class Agent:
                 feishu.set_message_handler(on_message)
                 logger.info("Feishu message handler registered for bidirectional comms")
 
+                def on_rejection(plan_id: str, step_id: str, action: str, note: str):
+                    """When a plan step is rejected, agent analyzes and proposes alternatives in group chat."""
+                    logger.info(f"Plan step rejected: {action[:50]}, note={note[:50]}")
+                    task = (
+                        f"你是 Google Ads 优化 Agent。领导刚刚在飞书审批中驳回了一个操作步骤，你需要在群聊中与领导沟通。\n\n"
+                        f"**被驳回的操作**: {action}\n"
+                        f"**驳回备注**: {note if note else '无备注'}\n"
+                        f"**Plan ID**: {plan_id}\n"
+                        f"**Step ID**: {step_id}\n\n"
+                        f"请用 notify 工具发一条消息到群聊：\n"
+                        f"1. 先表示收到驳回\n"
+                        f"2. 分析可能的原因\n"
+                        f"3. 提出一个替代方案或询问领导的意见\n"
+                        f"4. 语气要专业礼貌\n\n"
+                        f"只发一条消息就停止，不要做其他操作。"
+                    )
+                    try:
+                        self.run(task)
+                    except Exception as exc:
+                        logger.error(f"Rejection negotiation failed: {exc}")
+                feishu.set_rejection_handler(on_rejection)
+                logger.info("Feishu rejection handler registered for negotiation")
+
         from x_agent_kit.scheduler import Scheduler
         sched = Scheduler()
         items = schedules or self._config.schedules

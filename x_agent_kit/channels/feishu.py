@@ -25,6 +25,7 @@ class FeishuChannel(BaseChannel):
         self._tool_executor = None
         self._plan_manager = None
         self._message_handler = None
+        self._rejection_handler = None
 
     def send_text(self, text: str) -> dict[str, Any]:
         # If text contains markdown, send as card for proper rendering
@@ -122,6 +123,10 @@ class FeishuChannel(BaseChannel):
     def set_message_handler(self, handler) -> None:
         self._message_handler = handler
 
+    def set_rejection_handler(self, handler) -> None:
+        """Set callback for plan step rejections: handler(plan_id, step_id, action, note)."""
+        self._rejection_handler = handler
+
     def _send(self, msg_type: str, content: str) -> dict[str, Any]:
         try:
             request = CreateMessageRequest.builder().receive_id_type("chat_id").request_body(CreateMessageRequestBody.builder().receive_id(self._chat_id).msg_type(msg_type).content(content).build()).build()
@@ -218,18 +223,18 @@ class FeishuChannel(BaseChannel):
                                 from x_agent_kit.channels.feishu_cards import build_step_result_card
                                 self.send_card(build_step_result_card(s, str(exc)))
                         threading.Thread(target=execute_step, daemon=True).start()
-                if decision == "reject" and self._message_handler:
+                if decision == "reject" and self._rejection_handler:
                     try:
-                        plan = self._plan_manager.get(plan_id) if not plan else plan
-                        step = next((s for s in plan.steps if s.step_id == step_id), None) if plan else None
-                        action_desc = step.action if step else step_id
-                        note = step.rejection_note or "" if step else ""
-                        self._message_handler(
-                            self._chat_id,
-                            f"[PLAN_STEP_REJECTED] plan_id={plan_id} step_id={step_id} action={action_desc} note={note}"
-                        )
+                        plan_obj = self._plan_manager.get(plan_id)
+                        rejected_step = next((s for s in plan_obj.steps if s.step_id == step_id), None) if plan_obj else None
+                        if rejected_step:
+                            threading.Thread(
+                                target=self._rejection_handler,
+                                args=(plan_id, step_id, rejected_step.action, rejected_step.rejection_note or ""),
+                                daemon=True,
+                            ).start()
                     except Exception as exc:
-                        logger.error(f"Message handler error on plan step rejection: {exc}")
+                        logger.error(f"Rejection handler error: {exc}")
                 return resp
 
             # --- Legacy single-action approval path ---
