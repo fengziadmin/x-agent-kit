@@ -236,26 +236,24 @@ class Agent:
 
     def serve(self, schedules: list | None = None) -> None:
         """Start scheduled agent. If schedules not provided, reads from config."""
-        # Ensure Feishu WebSocket is running for approval callbacks
         feishu = self._channels.get("feishu")
+
+        # Register message handler BEFORE starting WebSocket so it gets registered
+        if self._conversation and feishu and hasattr(feishu, 'set_message_handler'):
+            def on_message(chat_id: str, text: str):
+                self._conversation.add_message("user", text, chat_id)
+                ctx = self._conversation.get_context(chat_id)
+                context_str = "\n".join(f"[{m['role']}] {m['content']}" for m in ctx[:-1]) if len(ctx) > 1 else ""
+                task = f"对话上下文:\n{context_str}\n\n用户消息: {text}" if context_str else text
+                result = self.run(task)
+                self._conversation.add_message("assistant", result, chat_id)
+            feishu.set_message_handler(on_message)
+            logger.info("Feishu message handler registered for bidirectional comms")
+
+        # Start WebSocket AFTER handlers are registered
         if feishu and hasattr(feishu, "_ensure_ws"):
             feishu._ensure_ws()
-            logger.info("Feishu WebSocket started for approval callbacks")
-
-        # Set up message handler for bidirectional communication
-        if self._conversation:
-            feishu = self._channels.get("feishu")
-            if feishu and hasattr(feishu, 'set_message_handler'):
-                def on_message(chat_id: str, text: str):
-                    self._conversation.add_message("user", text, chat_id)
-                    ctx = self._conversation.get_context(chat_id)
-                    context_str = "\n".join(f"[{m['role']}] {m['content']}" for m in ctx[:-1]) if len(ctx) > 1 else ""
-                    task = f"对话上下文:\n{context_str}\n\n用户消息: {text}" if context_str else text
-                    result = self.run(task)
-                    self._conversation.add_message("assistant", result, chat_id)
-                feishu.set_message_handler(on_message)
-                logger.info("Feishu message handler registered for bidirectional comms")
-
+            logger.info("Feishu WebSocket started (card actions + message receive)")
 
         from x_agent_kit.scheduler import Scheduler
         sched = Scheduler()
