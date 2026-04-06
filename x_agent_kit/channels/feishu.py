@@ -123,6 +123,21 @@ class FeishuChannel(BaseChannel):
     def set_message_handler(self, handler) -> None:
         self._message_handler = handler
 
+    def _get_bot_open_id(self) -> str:
+        """Get and cache the bot's open_id via Feishu API."""
+        if not hasattr(self, "_bot_open_id_cache"):
+            self._bot_open_id_cache = ""
+            try:
+                from lark_oapi.api.bot.v3 import BotInfoRequest
+                req = BotInfoRequest.builder().build()
+                resp = self._client.bot.v3.bot_info.get(req)
+                if resp.success() and resp.data and resp.data.bot:
+                    self._bot_open_id_cache = resp.data.bot.open_id or ""
+                    logger.debug(f"Bot open_id: {self._bot_open_id_cache}")
+            except Exception as exc:
+                logger.debug(f"Failed to get bot open_id: {exc}")
+        return self._bot_open_id_cache
+
     def add_reaction(self, message_id: str, emoji: str = "OnIt") -> str | None:
         """Add an emoji reaction to a message. Returns reaction_id or None."""
         try:
@@ -214,6 +229,21 @@ class FeishuChannel(BaseChannel):
             if len(self._handled_messages) > 500:
                 self._handled_messages = set(list(self._handled_messages)[-200:])
             chat_id = getattr(msg, "chat_id", "")
+            chat_type = getattr(msg, "chat_type", "")
+            # In group chats, only respond when @bot is mentioned
+            if chat_type == "group":
+                mentions = getattr(msg, "mentions", None) or []
+                bot_open_id = self._get_bot_open_id()
+                bot_mentioned = False
+                for m in mentions:
+                    m_id = getattr(m, "id", None)
+                    if m_id:
+                        open_id = getattr(m_id, "open_id", "") if hasattr(m_id, "open_id") else m_id.get("open_id", "") if isinstance(m_id, dict) else ""
+                        if open_id and bot_open_id and open_id == bot_open_id:
+                            bot_mentioned = True
+                            break
+                if not bot_mentioned:
+                    return
             content_str = getattr(msg, "content", "{}")
             try:
                 content = json.loads(content_str)
@@ -222,7 +252,11 @@ class FeishuChannel(BaseChannel):
                 text = str(content_str)
             if not text.strip():
                 return
-            text = text.strip()
+            # Remove @mention tags from text
+            import re
+            text = re.sub(r"@_user_\d+\s*", "", text).strip()
+            if not text:
+                return
             if self._message_handler:
                 self._message_handler(chat_id, text, message_id)
         except Exception as exc:
