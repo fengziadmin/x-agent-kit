@@ -13,6 +13,7 @@ class ToolMeta:
     description: str
     func: Callable
     parameters: dict
+    label: str = ""
 
     def schema(self) -> dict:
         return {
@@ -46,9 +47,9 @@ def _extract_parameters(func: Callable) -> dict:
             properties[param_name]["default"] = param.default
     return {"type": "object", "properties": properties, "required": required}
 
-def tool(description: str) -> Callable:
+def tool(description: str, label: str = "") -> Callable:
     def decorator(func: Callable) -> Callable:
-        meta = ToolMeta(name=func.__name__, description=description, func=func, parameters=_extract_parameters(func))
+        meta = ToolMeta(name=func.__name__, description=description, func=func, parameters=_extract_parameters(func), label=label)
         func._tool_meta = meta
         return func
     return decorator

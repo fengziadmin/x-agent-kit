@@ -84,3 +84,47 @@ class TestToolRegistry:
         result = reg.execute("bad_tool", {})
         assert "ValueError" in result
         assert "broken" in result
+
+
+class TestToolLabel:
+    def test_tool_with_label(self):
+        from x_agent_kit.tools.base import tool
+        @tool("does stuff", label="📊 My Tool")
+        def my_tool() -> str:
+            return "ok"
+        assert my_tool._tool_meta.label == "📊 My Tool"
+
+    def test_tool_without_label_defaults_empty(self):
+        from x_agent_kit.tools.base import tool
+        @tool("does stuff")
+        def my_tool() -> str:
+            return "ok"
+        assert my_tool._tool_meta.label == ""
+
+    def test_label_not_in_schema(self):
+        from x_agent_kit.tools.base import tool
+        @tool("does stuff", label="📊 My Tool")
+        def my_tool() -> str:
+            return "ok"
+        schema = my_tool._tool_meta.schema()
+        assert "label" not in schema["function"]
+
+
+class TestToolRegistryGetMeta:
+    def test_get_meta_returns_tool_meta(self):
+        from x_agent_kit.tools.base import tool
+        from x_agent_kit.tools.registry import ToolRegistry
+        @tool("adds", label="➕ Add")
+        def add(a: int, b: int) -> int:
+            return a + b
+        reg = ToolRegistry()
+        reg.register(add)
+        meta = reg.get_meta("add")
+        assert meta is not None
+        assert meta.label == "➕ Add"
+        assert meta.name == "add"
+
+    def test_get_meta_returns_none_for_unknown(self):
+        from x_agent_kit.tools.registry import ToolRegistry
+        reg = ToolRegistry()
+        assert reg.get_meta("nonexistent") is None
