@@ -5,7 +5,7 @@ from x_agent_kit.tools.base import tool
 
 
 def create_save_memory_tool(memory) -> Callable:
-    @tool("Save important information to persistent memory for future sessions.")
+    @tool("Save important information to persistent memory for future sessions.", label="💾 Save Memory")
     def save_memory(key: str, content: str) -> str:
         memory.save(key, content)
         return f"Memory saved: {key}"
@@ -13,14 +13,14 @@ def create_save_memory_tool(memory) -> Callable:
 
 
 def create_recall_memories_tool(memory) -> Callable:
-    @tool("Recall recent memories from previous sessions. Use search_memory for specific topics.")
+    @tool("Recall recent memories from previous sessions. Use search_memory for specific topics.", label="📝 Recall Memories")
     def recall_memories() -> str:
         return memory.summary()
     return recall_memories
 
 
 def create_search_memory_tool(memory) -> Callable:
-    @tool("Search past memories by keyword. Use this to find specific information from previous sessions.")
+    @tool("Search past memories by keyword. Use this to find specific information from previous sessions.", label="🔍 Search Memory")
     def search_memory(query: str, limit: int = 5) -> str:
         """
         Args:
@@ -38,7 +38,7 @@ def create_search_memory_tool(memory) -> Callable:
 
 
 def create_clear_memory_tool(memory) -> Callable:
-    @tool("Clear all persistent memories. Use with caution — this deletes all saved analysis records.")
+    @tool("Clear all persistent memories. Use with caution — this deletes all saved analysis records.", label="🗑️ Clear Memory")
     def clear_memory() -> str:
         count = memory.count()
         memory.clear()
@@ -47,7 +47,7 @@ def create_clear_memory_tool(memory) -> Callable:
 
 
 def create_load_skill_tool(loader) -> Callable:
-    @tool("Load a skill (domain knowledge) by name. Call this when you need specialized expertise.")
+    @tool("Load a skill (domain knowledge) by name. Call this when you need specialized expertise.", label="📚 Load Skill")
     def load_skill(name: str) -> str:
         """
         Args:
@@ -57,14 +57,14 @@ def create_load_skill_tool(loader) -> Callable:
     return load_skill
 
 def create_list_skills_tool(loader) -> Callable:
-    @tool("List all available skills. Call this to see what domain knowledge is available.")
+    @tool("List all available skills. Call this to see what domain knowledge is available.", label="📋 List Skills")
     def list_skills() -> str:
         names = loader.list()
         return ", ".join(names) if names else "No skills available."
     return list_skills
 
 def create_notify_tool(channels: dict) -> Callable:
-    @tool("Send a notification message to the user.")
+    @tool("Send a notification message to the user.", label="📢 Notify")
     def notify(message: str, channel: str = "default") -> bool:
         """
         Args:
@@ -79,7 +79,7 @@ def create_notify_tool(channels: dict) -> Callable:
     return notify
 
 def create_request_approval_tool(channels: dict, approval_queue=None) -> Callable:
-    @tool("Submit an action for human approval. Does NOT block — the action will be executed when approved.")
+    @tool("Submit an action for human approval. Does NOT block — the action will be executed when approved.", label="📋 Request Approval")
     def request_approval(action: str, details: str, tool_name: str = "", tool_args: str = "") -> str:
         """
         Args:
@@ -116,7 +116,7 @@ def create_request_approval_tool(channels: dict, approval_queue=None) -> Callabl
 # ---------------------------------------------------------------------------
 
 def create_plan_tool(plan_manager) -> Callable:
-    @tool("Create a structured execution plan from a list of steps. Returns the plan ID.")
+    @tool("Create a structured execution plan from a list of steps. Returns the plan ID.", label="📝 Create Plan")
     def create_plan(title: str, summary: str, plan_type: str, steps: str) -> str:
         """
         Args:
@@ -132,7 +132,7 @@ def create_plan_tool(plan_manager) -> Callable:
 
 
 def create_submit_plan_tool(plan_manager, channels: dict) -> Callable:
-    @tool("Submit a plan for human approval via Feishu. Sends an interactive approval card.")
+    @tool("Submit a plan for human approval via Feishu. Sends an interactive approval card.", label="📤 Submit Plan")
     def submit_plan(plan_id: str) -> str:
         """
         Args:
@@ -159,7 +159,7 @@ def create_submit_plan_tool(plan_manager, channels: dict) -> Callable:
 
 
 def create_get_plan_tool(plan_manager) -> Callable:
-    @tool("Get the current status of a plan and all its steps as JSON.")
+    @tool("Get the current status of a plan and all its steps as JSON.", label="📄 Get Plan")
     def get_plan(plan_id: str) -> str:
         """
         Args:
@@ -195,7 +195,7 @@ def create_get_plan_tool(plan_manager) -> Callable:
 
 
 def create_execute_approved_steps_tool(plan_manager, tool_executor, channels: dict) -> Callable:
-    @tool("Execute all approved steps in a plan. Skips non-approved steps. Reports results via Feishu card.")
+    @tool("Execute all approved steps in a plan. Skips non-approved steps. Reports results via Feishu card.", label="▶️ Execute Steps")
     def execute_approved_steps(plan_id: str) -> str:
         """
         Args:
@@ -238,7 +238,7 @@ def create_execute_approved_steps_tool(plan_manager, tool_executor, channels: di
 
 
 def create_update_step_tool(plan_manager) -> Callable:
-    @tool("Update a plan step's action, tool, or arguments after negotiation.")
+    @tool("Update a plan step's action, tool, or arguments after negotiation.", label="✏️ Update Step")
     def update_step(plan_id: str, step_id: str, new_action: str, new_tool_name: str, new_tool_args: str = "{}") -> str:
         """
         Args:
@@ -255,7 +255,7 @@ def create_update_step_tool(plan_manager) -> Callable:
 
 
 def create_resubmit_step_tool(plan_manager, channels: dict) -> Callable:
-    @tool("Resubmit a rejected step for re-approval after modification. Sends a negotiation card.")
+    @tool("Resubmit a rejected step for re-approval after modification. Sends a negotiation card.", label="🔄 Resubmit Step")
     def resubmit_step(plan_id: str, step_id: str) -> str:
         """
         Args:

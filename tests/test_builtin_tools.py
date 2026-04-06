@@ -62,3 +62,32 @@ class TestBuiltinRequestApproval:
         assert call_args[3] == "pause_campaign"  # tool_name
         assert call_args[4] == {"id": "123"}     # tool_args
         assert "pause_campaign" in result
+
+class TestBuiltinToolLabels:
+    def test_save_memory_has_label(self):
+        from x_agent_kit.tools.builtin import create_save_memory_tool
+        from unittest.mock import MagicMock
+        fn = create_save_memory_tool(MagicMock())
+        assert fn._tool_meta.label != ""
+
+    def test_load_skill_has_label(self):
+        from x_agent_kit.tools.builtin import create_load_skill_tool
+        from unittest.mock import MagicMock
+        fn = create_load_skill_tool(MagicMock())
+        assert fn._tool_meta.label != ""
+
+    def test_notify_has_label(self):
+        from x_agent_kit.tools.builtin import create_notify_tool
+        fn = create_notify_tool({"default": MagicMock()})
+        assert fn._tool_meta.label != ""
+
+    def test_request_approval_has_label(self):
+        from x_agent_kit.tools.builtin import create_request_approval_tool
+        fn = create_request_approval_tool({"default": MagicMock()})
+        assert fn._tool_meta.label != ""
+
+    def test_create_plan_has_label(self):
+        from x_agent_kit.tools.builtin import create_plan_tool
+        from unittest.mock import MagicMock
+        fn = create_plan_tool(MagicMock())
+        assert fn._tool_meta.label != ""
