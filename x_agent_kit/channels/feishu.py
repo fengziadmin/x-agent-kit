@@ -123,11 +123,16 @@ class FeishuChannel(BaseChannel):
         self._message_handler = handler
 
     def reply_text(self, message_id: str, text: str) -> dict[str, Any]:
-        """Reply to a specific message (thread reply)."""
+        """Reply to a specific message (thread reply). Uses card for markdown rendering."""
         try:
-            content = json.dumps({"text": text})
+            # Build a card for proper markdown rendering
+            card = {
+                "schema": "2.0",
+                "body": {"elements": [{"tag": "markdown", "content": text}]},
+            }
+            content = json.dumps(card)
             req = ReplyMessageRequest.builder().message_id(message_id).request_body(
-                ReplyMessageRequestBody.builder().msg_type("text").content(content).build()
+                ReplyMessageRequestBody.builder().msg_type("interactive").content(content).build()
             ).build()
             response = self._client.im.v1.message.reply(req)
             if response.success():
