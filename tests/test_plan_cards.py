@@ -1,5 +1,7 @@
 from __future__ import annotations
 import json
+from x_agent_kit.i18n import set_locale
+set_locale("zh_CN")
 from x_agent_kit.plan import Plan, PlanStep
 from x_agent_kit.channels.feishu_cards import (
     build_plan_approval_card,

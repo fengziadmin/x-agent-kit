@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+from x_agent_kit.i18n import set_locale
+set_locale("zh_CN")
+
 
 class TestBuildConfirmationCard:
     def test_returns_dict(self):

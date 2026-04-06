@@ -16,6 +16,8 @@ from lark_oapi.api.cardkit.v1 import (
 from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody
 from loguru import logger
 
+from x_agent_kit.i18n import t
+
 STREAMING_ELEMENT_ID = "streaming_content"
 LOADING_ELEMENT_ID = "loading_icon"
 
@@ -38,7 +40,7 @@ class StreamingCard:
             "config": {"streaming_mode": True},
             "header": {"title": {"content": title, "tag": "plain_text"}, "template": "blue"},
             "body": {"elements": [
-                {"tag": "markdown", "content": "正在思考...", "element_id": STREAMING_ELEMENT_ID},
+                {"tag": "markdown", "content": t("agent.thinking"), "element_id": STREAMING_ELEMENT_ID},
                 {"tag": "markdown", "content": "⏳", "element_id": LOADING_ELEMENT_ID},
             ]},
         })
@@ -175,14 +177,14 @@ def build_status_card(title: str, status: str, color: str, content: str = "") ->
     """Build a status card (thinking/processing/complete/expired)."""
     status_colors = {"pending": "blue", "processing": "turquoise", "complete": "green", "error": "red", "expired": "grey"}
     template = status_colors.get(status, color)
-    tag_text = {"pending": "待处理", "processing": "处理中", "complete": "已完成", "error": "失败", "expired": "已过期"}
+    tag_display = t(f"status.{status}", default=status)
 
     card = {
         "schema": "2.0",
         "header": {
             "title": {"content": title, "tag": "plain_text"},
             "template": template,
-            "text_tag_list": [{"tag": "text_tag", "text": {"tag": "plain_text", "content": tag_text.get(status, status)}, "color": template}],
+            "text_tag_list": [{"tag": "text_tag", "text": {"tag": "plain_text", "content": tag_display}, "color": template}],
         },
         "body": {"elements": []},
     }
@@ -194,23 +196,23 @@ def build_status_card(title: str, status: str, color: str, content: str = "") ->
 def build_confirmation_card(request_id: str, action: str, details: str, preview: str = "") -> dict:
     """Build an orange confirmation card with approve/reject buttons."""
     elements = [
-        {"tag": "markdown", "content": f"**操作**: {action}\n\n{details}"},
+        {"tag": "markdown", "content": f"**{t('card.operation')}**: {action}\n\n{details}"},
     ]
     if preview:
         elements.append({"tag": "hr"})
-        elements.append({"tag": "markdown", "content": f"**预览**:\n{preview}"})
+        elements.append({"tag": "markdown", "content": f"**{t('card.preview')}**:\n{preview}"})
 
     elements.append({"tag": "hr"})
     elements.append({
         "tag": "column_set",
         "columns": [
             {"tag": "column", "width": "weighted", "weight": 1, "elements": [
-                {"tag": "button", "text": {"tag": "plain_text", "content": "✅ 批准"},
+                {"tag": "button", "text": {"tag": "plain_text", "content": t("card.approve")},
                  "type": "primary",
                  "behaviors": [{"type": "callback", "value": {"request_id": request_id, "decision": "approve"}}]},
             ]},
             {"tag": "column", "width": "weighted", "weight": 1, "elements": [
-                {"tag": "button", "text": {"tag": "plain_text", "content": "❌ 拒绝"},
+                {"tag": "button", "text": {"tag": "plain_text", "content": t("card.reject")},
                  "type": "danger",
                  "behaviors": [{"type": "callback", "value": {"request_id": request_id, "decision": "reject"}}]},
             ]},
@@ -220,9 +222,9 @@ def build_confirmation_card(request_id: str, action: str, details: str, preview:
     return {
         "schema": "2.0",
         "header": {
-            "title": {"content": f"⚠️ 审批: {action}", "tag": "plain_text"},
+            "title": {"content": t("card.approval_title", action=action), "tag": "plain_text"},
             "template": "orange",
-            "text_tag_list": [{"tag": "text_tag", "text": {"tag": "plain_text", "content": "待审批"}, "color": "orange"}],
+            "text_tag_list": [{"tag": "text_tag", "text": {"tag": "plain_text", "content": t("card.pending")}, "color": "orange"}],
         },
         "body": {"elements": elements},
     }
@@ -231,19 +233,6 @@ def build_confirmation_card(request_id: str, action: str, details: str, preview:
 # ---------------------------------------------------------------------------
 # Plan approval card builders
 # ---------------------------------------------------------------------------
-
-_RISK_LABELS = {"high": "🔴 高风险", "medium": "🟡 中风险", "low": "🟢 低风险"}
-_PRIORITY_LABELS = {"high": "紧急", "medium": "常规", "low": "低优"}
-_TYPE_LABELS = {"daily": "日常计划", "weekly": "周度策略", "monthly": "月度复盘"}
-
-
-_STEP_STATUS_LABELS = {
-    "approved": "✅ 已批准",
-    "rejected": "❌ 已拒绝",
-    "executed": "✅ 已执行",
-    "failed": "❌ 执行失败",
-    "negotiating": "💬 协商中",
-}
 
 
 def build_plan_approval_card(plan) -> dict:
@@ -254,7 +243,7 @@ def build_plan_approval_card(plan) -> dict:
     """
     from x_agent_kit.plan import Plan  # noqa: F811 — deferred to avoid circular imports
 
-    type_label = _TYPE_LABELS.get(plan.plan_type, plan.plan_type)
+    type_label = t(f"plan.type.{plan.plan_type}", default=plan.plan_type)
     step_count = len(plan.steps)
 
     # Count decided steps
@@ -262,17 +251,17 @@ def build_plan_approval_card(plan) -> dict:
     pending = step_count - decided
 
     elements: list[dict] = [
-        {"tag": "markdown", "content": f"**摘要**: {plan.summary}"},
+        {"tag": "markdown", "content": f"**{t('plan.summary')}**: {plan.summary}"},
         {"tag": "hr"},
     ]
 
     for step in plan.steps:
-        risk_label = _RISK_LABELS.get(step.risk_level, step.risk_level)
-        priority_label = _PRIORITY_LABELS.get(step.priority, step.priority)
+        risk_label = t(f"plan.risk.{step.risk_level}", default=step.risk_level)
+        priority_label = t(f"plan.priority.{step.priority}", default=step.priority)
 
-        if step.status in _STEP_STATUS_LABELS:
+        if step.status in ("approved", "rejected", "executed", "failed", "negotiating"):
             # Already decided — show status text instead of buttons
-            status_text = _STEP_STATUS_LABELS[step.status]
+            status_text = t(f"plan.step.{step.status}", default=step.status)
             elements.append(
                 {"tag": "markdown", "content": f"{risk_label}  |  **{priority_label}**\n{step.action}\n\n**{status_text}**"}
             )
@@ -285,13 +274,13 @@ def build_plan_approval_card(plan) -> dict:
                 "tag": "column_set",
                 "columns": [
                     {"tag": "column", "width": "weighted", "weight": 1, "elements": [
-                        {"tag": "button", "text": {"tag": "plain_text", "content": "✅ 批准"},
+                        {"tag": "button", "text": {"tag": "plain_text", "content": t("card.approve")},
                          "type": "primary",
                          "behaviors": [{"type": "callback", "value": {
                              "plan_id": plan.plan_id, "step_id": step.step_id, "decision": "approve"}}]},
                     ]},
                     {"tag": "column", "width": "weighted", "weight": 1, "elements": [
-                        {"tag": "button", "text": {"tag": "plain_text", "content": "❌ 拒绝"},
+                        {"tag": "button", "text": {"tag": "plain_text", "content": t("card.reject")},
                          "type": "danger",
                          "behaviors": [{"type": "callback", "value": {
                              "plan_id": plan.plan_id, "step_id": step.step_id, "decision": "reject"}}]},
@@ -306,7 +295,7 @@ def build_plan_approval_card(plan) -> dict:
         header_title = f"✅ {plan.title}"
     elif pending == 0:
         header_color = "blue"
-        header_title = f"📋 {plan.title} (已处理)"
+        header_title = f"📋 {plan.title} ({t('plan.processed')})"
     else:
         header_color = "orange"
         header_title = f"📋 {plan.title}"
@@ -318,7 +307,7 @@ def build_plan_approval_card(plan) -> dict:
             "template": header_color,
             "text_tag_list": [
                 {"tag": "text_tag", "text": {"tag": "plain_text", "content": type_label}, "color": "orange"},
-                {"tag": "text_tag", "text": {"tag": "plain_text", "content": f"全部通过 ✅" if pending == 0 and all(s.status in ("approved", "executed") for s in plan.steps) else f"{pending} 项待审批 / 共 {step_count} 项"}, "color": "green" if pending == 0 else "turquoise"},
+                {"tag": "text_tag", "text": {"tag": "plain_text", "content": t("plan.all_approved") if pending == 0 and all(s.status in ("approved", "executed") for s in plan.steps) else t("plan.pending_count", pending=pending, total=step_count)}, "color": "green" if pending == 0 else "turquoise"},
             ],
         },
         "body": {"elements": elements},
@@ -330,7 +319,7 @@ def build_step_result_card(step, result: str) -> dict:
     is_failed = step.status == "failed"
     template = "red" if is_failed else "green"
     icon = "❌" if is_failed else "✅"
-    status_text = "执行失败" if is_failed else "执行成功"
+    status_text = t("plan.exec_failed") if is_failed else t("plan.exec_success")
 
     return {
         "schema": "2.0",
@@ -339,9 +328,9 @@ def build_step_result_card(step, result: str) -> dict:
             "template": template,
         },
         "body": {"elements": [
-            {"tag": "markdown", "content": f"**操作**: {step.action}"},
+            {"tag": "markdown", "content": f"**{t('card.operation')}**: {step.action}"},
             {"tag": "hr"},
-            {"tag": "markdown", "content": f"**结果**: {result}"},
+            {"tag": "markdown", "content": f"**{t('card.result')}**: {result}"},
         ]},
     }
 
@@ -351,22 +340,22 @@ def build_negotiation_card(step, new_proposal: str) -> dict:
     elements: list[dict] = []
 
     if step.rejection_note:
-        elements.append({"tag": "markdown", "content": f"**拒绝原因**: {step.rejection_note}"})
+        elements.append({"tag": "markdown", "content": f"**{t('card.rejection_reason')}**: {step.rejection_note}"})
         elements.append({"tag": "hr"})
 
-    elements.append({"tag": "markdown", "content": f"**新方案**: {new_proposal}"})
+    elements.append({"tag": "markdown", "content": f"**{t('card.new_proposal')}**: {new_proposal}"})
     elements.append({"tag": "hr"})
     elements.append({
         "tag": "column_set",
         "columns": [
             {"tag": "column", "width": "weighted", "weight": 1, "elements": [
-                {"tag": "button", "text": {"tag": "plain_text", "content": "✅ 批准"},
+                {"tag": "button", "text": {"tag": "plain_text", "content": t("card.approve")},
                  "type": "primary",
                  "behaviors": [{"type": "callback", "value": {
                      "step_id": step.step_id, "decision": "approve"}}]},
             ]},
             {"tag": "column", "width": "weighted", "weight": 1, "elements": [
-                {"tag": "button", "text": {"tag": "plain_text", "content": "💬 继续讨论"},
+                {"tag": "button", "text": {"tag": "plain_text", "content": t("card.continue_discuss")},
                  "type": "default",
                  "behaviors": [{"type": "callback", "value": {
                      "step_id": step.step_id, "decision": "discuss"}}]},
@@ -377,7 +366,7 @@ def build_negotiation_card(step, new_proposal: str) -> dict:
     return {
         "schema": "2.0",
         "header": {
-            "title": {"content": f"🔄 协商: {step.action}", "tag": "plain_text"},
+            "title": {"content": t("card.negotiation_title", action=step.action), "tag": "plain_text"},
             "template": "blue",
         },
         "body": {"elements": elements},

@@ -16,6 +16,9 @@ class ToolRegistry:
     def list(self) -> list[ToolMeta]:
         return list(self._tools.values())
 
+    def get_meta(self, name: str) -> ToolMeta | None:
+        return self._tools.get(name)
+
     def schemas(self) -> list[dict]:
         return [meta.schema() for meta in self._tools.values()]
 

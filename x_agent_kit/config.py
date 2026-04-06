@@ -57,6 +57,7 @@ class Config:
     agent: AgentConfig
     memory: MemoryConfig = field(default_factory=MemoryConfig)
     schedules: list[ScheduleConfig] = field(default_factory=list)
+    locale: str = "zh_CN"
 
 
 def load_config(config_dir: str) -> Config:
@@ -86,6 +87,8 @@ def load_config(config_dir: str) -> Config:
     for s in raw.get("schedules", []):
         schedules.append(ScheduleConfig(cron=s["cron"], task=s["task"]))
 
+    locale = raw.get("locale", "zh_CN")
+
     return Config(
         brain=brain,
         providers=providers,
@@ -94,4 +97,5 @@ def load_config(config_dir: str) -> Config:
         agent=agent,
         memory=memory,
         schedules=schedules,
+        locale=locale,
     )
