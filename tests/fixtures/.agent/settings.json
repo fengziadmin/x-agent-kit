@@ -18,6 +18,7 @@
     "enabled": true,
     "dir": ".agent/memory"
   },
+  "locale": "zh_CN",
   "schedules": [
     {"cron": "0 9 * * *", "task": "Daily analysis task"},
     {"cron": "0 */6 * * *", "task": "Periodic check task"}

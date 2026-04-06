@@ -61,3 +61,19 @@ class TestLoadConfig:
         config = load_config(str(FIXTURES / ".agent"))
         assert config.memory.enabled is True
         assert config.memory.dir == ".agent/memory"
+
+    def test_loads_locale_config(self):
+        from x_agent_kit.config import load_config
+        config = load_config(str(FIXTURES / ".agent"))
+        assert config.locale == "zh_CN"
+
+    def test_locale_defaults_to_zh_cn(self):
+        from x_agent_kit.config import Config, BrainConfig, AgentConfig, SkillsConfig, MemoryConfig
+        config = Config(
+            brain=BrainConfig(provider="gemini"),
+            providers={},
+            channels={},
+            skills=SkillsConfig(),
+            agent=AgentConfig(),
+        )
+        assert config.locale == "zh_CN"
