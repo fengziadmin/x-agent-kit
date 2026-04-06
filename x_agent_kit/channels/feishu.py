@@ -138,7 +138,6 @@ class FeishuChannel(BaseChannel):
         builder = lark.EventDispatcherHandler.builder("", "")
         builder = builder.register_p2_card_action_trigger(self._on_card_action)
         if self._message_handler:
-            from lark_oapi.event.im.v1 import P2ImMessageReceiveV1
             builder = builder.register_p2_im_message_receive_v1(self._on_message_receive)
         handler = builder.build()
         ws = lark.ws.Client(app_id=self._app_id, app_secret=self._app_secret, event_handler=handler, log_level=lark.LogLevel.ERROR, auto_reconnect=True)
