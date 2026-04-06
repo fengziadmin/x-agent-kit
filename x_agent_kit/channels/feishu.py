@@ -124,16 +124,20 @@ class FeishuChannel(BaseChannel):
         self._message_handler = handler
 
     def _get_bot_open_id(self) -> str:
-        """Get and cache the bot's open_id via Feishu API."""
+        """Get and cache the bot's open_id via Feishu REST API."""
         if not hasattr(self, "_bot_open_id_cache"):
             self._bot_open_id_cache = ""
             try:
-                from lark_oapi.api.bot.v3 import BotInfoRequest
-                req = BotInfoRequest.builder().build()
-                resp = self._client.bot.v3.bot_info.get(req)
-                if resp.success() and resp.data and resp.data.bot:
-                    self._bot_open_id_cache = resp.data.bot.open_id or ""
-                    logger.debug(f"Bot open_id: {self._bot_open_id_cache}")
+                import requests as _requests
+                r = _requests.post("https://open.feishu.cn/open-apis/auth/v3/tenant_access_token/internal",
+                    json={"app_id": self._app_id, "app_secret": self._app_secret}, timeout=5)
+                token = r.json().get("tenant_access_token", "")
+                if token:
+                    r2 = _requests.get("https://open.feishu.cn/open-apis/bot/v3/info",
+                        headers={"Authorization": f"Bearer {token}"}, timeout=5)
+                    bot = r2.json().get("bot", {})
+                    self._bot_open_id_cache = bot.get("open_id", "")
+                    logger.info(f"Bot open_id: {self._bot_open_id_cache}")
             except Exception as exc:
                 logger.debug(f"Failed to get bot open_id: {exc}")
         return self._bot_open_id_cache
