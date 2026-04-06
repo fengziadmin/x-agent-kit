@@ -1,9 +1,11 @@
 from __future__ import annotations
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 from loguru import logger
 from x_agent_kit.config import Config, load_config
+from x_agent_kit.i18n import t, set_locale
 from x_agent_kit.models import BrainResponse, Message
+from x_agent_kit.progress import ProgressRenderer
 from x_agent_kit.skills.loader import SkillLoader
 from x_agent_kit.tools.builtin import create_list_skills_tool, create_load_skill_tool, create_notify_tool, create_request_approval_tool, create_save_memory_tool, create_recall_memories_tool, create_search_memory_tool, create_clear_memory_tool, create_plan_tool, create_submit_plan_tool, create_get_plan_tool, create_execute_approved_steps_tool, create_update_step_tool, create_resubmit_step_tool
 from x_agent_kit.tools.registry import ToolRegistry
@@ -45,8 +47,10 @@ def create_channels(config: Config) -> dict[str, Any]:
     return channels
 
 class Agent:
-    def __init__(self, config_dir: str = ".agent") -> None:
+    def __init__(self, config_dir: str = ".agent", stop_condition: Callable[[str, Any], bool] | None = None) -> None:
         self._config = load_config(config_dir)
+        set_locale(self._config.locale)
+        self._stop_condition = stop_condition
         self._brain = create_brain(self._config)
         self._tools = ToolRegistry()
         self._skills = SkillLoader(self._config.skills.paths)
@@ -111,52 +115,25 @@ class Agent:
         messages = [Message(role="user", content=task_with_memory)]
         max_iter = self._config.agent.max_iterations
         notified = False
-        memory_saved = False
+        notify_content = ""
+        loaded_skills = set()
 
-        # Start streaming card if feishu channel available (skip in reply mode)
-        streaming_card = None
         reply_mode = getattr(self, "_reply_mode", False)
         default_ch = self._channels.get("default")
-        if default_ch and hasattr(default_ch, "send_streaming_start") and not reply_mode:
-            streaming_card = default_ch.send_streaming_start("🤔 Agent 分析中...")
-        notify_content = ""
-        progress_steps = []  # Human-readable progress
-        loaded_skills = set()  # Track loaded skills to prevent duplicates
-
-        # Tool name → readable label
-        tool_labels = {
-            "recall_memories": "📝 回顾历史记忆",
-            "query_campaigns": "📊 查询广告数据",
-            "query_ga4_traffic": "📈 查询 GA4 流量",
-            "query_campaign_ga4": "📈 查询广告系列 GA4 数据",
-            "load_skill": "📚 加载专业知识",
-            "search_memory": "🔍 搜索历史记忆",
-            "analyze_website": "🌐 分析网站内容",
-            "save_memory": "💾 保存分析记录",
-        }
-
-        def _render_progress() -> str:
-            return "\n".join(f"- {s}" for s in progress_steps)
+        renderer = ProgressRenderer(channel=default_ch, enabled=not reply_mode)
 
         for i in range(max_iter):
             logger.info(f"Agent iteration {i+1}/{max_iter}")
-
-            if streaming_card:
-                streaming_card.update_text(_render_progress() + "\n\n🧠 思考中...")
+            renderer.update_text(t("agent.thinking"))
 
             response = self._brain.think(messages=messages, tools=self._tools.schemas())
             if response.done or (response.text and not response.tool_calls):
-                # Use notify content for card, never raw brain output
-                final = notify_content or "分析完成"
-                if progress_steps:
-                    final = _render_progress() + "\n---\n" + final
-                if streaming_card:
-                    streaming_card.complete("✅ 分析完成", final, "green")
+                final = notify_content or response.text or t("agent.complete")
+                renderer.finish(t("agent.complete_title"), final, "green")
                 return notify_content or response.text or ""
 
             if response.tool_calls:
                 for call in response.tool_calls:
-                    # notify: capture content, don't send separate message
                     if call.name == "notify":
                         if notified:
                             messages.append(Message(
@@ -166,26 +143,22 @@ class Agent:
                             continue
                         notified = True
                         notify_content = call.arguments.get("message", "")
-                        if streaming_card:
-                            streaming_card.update_text(_render_progress() + "\n\n" + notify_content)
-                        else:
+                        renderer.update_text(notify_content)
+                        if not renderer._card:
                             self._tools.execute(call.name, call.arguments)
                         messages.append(Message(role="tool_result", content="OK", tool_call_id=call.name))
                         continue
 
-                    # request_approval: always send as separate card (not in streaming card)
                     if call.name == "request_approval":
-                        label = f"📋 提交审批: {call.arguments.get('action', '')}"
-                        progress_steps.append(label)
-                        if streaming_card:
-                            streaming_card.update_text(_render_progress())
+                        meta = self._tools.get_meta(call.name)
+                        label = meta.label if meta and meta.label else f"📋 {call.arguments.get('action', '')}"
+                        renderer.add_step(label)
                         logger.info(f"Tool call: {call.name}({call.arguments})")
                         result = self._tools.execute(call.name, call.arguments)
-                        progress_steps[-1] = f"✅ {label[2:]}"
+                        renderer.complete_step(label)
                         messages.append(Message(role="tool_result", content=str(result), tool_call_id=call.name))
                         continue
 
-                    # Dedup load_skill calls
                     if call.name == "load_skill":
                         skill_name = call.arguments.get("name", "")
                         if skill_name in loaded_skills:
@@ -197,44 +170,27 @@ class Agent:
                             continue
                         loaded_skills.add(skill_name)
 
-                    # Regular tools: show readable progress
-                    label = tool_labels.get(call.name, f"🔧 {call.name}")
+                    meta = self._tools.get_meta(call.name)
+                    label = meta.label if meta and meta.label else f"🔧 {call.name}"
                     if call.name == "load_skill":
-                        label = f"📚 加载 {call.arguments.get('name', '知识')}"
-                    progress_steps.append(f"{label}...")
-                    if streaming_card:
-                        streaming_card.update_text(_render_progress())
+                        label = f"📚 {call.arguments.get('name', 'skill')}"
+                    renderer.add_step(label)
 
                     logger.info(f"Tool call: {call.name}({call.arguments})")
                     result = self._tools.execute(call.name, call.arguments)
                     messages.append(Message(role="tool_result", content=str(result), tool_call_id=call.name))
+                    renderer.complete_step(label)
 
-                    progress_steps[-1] = f"✅ {label[2:] if label[0] in '📝📊📈📚🔍🌐💾🔧' else label}"
-                    if streaming_card:
-                        streaming_card.update_text(_render_progress())
-
-                    if call.name == "save_memory":
-                        memory_saved = True
-
-            if memory_saved:
-                logger.info("Memory saved, stopping agent loop")
-                # Build final card: progress steps + analysis result
-                parts = []
-                if progress_steps:
-                    parts.append(_render_progress())
-                if notify_content:
-                    parts.append("---")
-                    parts.append(notify_content)
-                final = "\n".join(parts) if parts else "完成"
-                if streaming_card:
-                    streaming_card.complete("✅ 分析完成", final, "green")
-                return response.text or "Task complete."
+                    if self._stop_condition and self._stop_condition(call.name, result):
+                        logger.info(f"Stop condition met after {call.name}")
+                        final = notify_content or t("agent.complete")
+                        renderer.finish(t("agent.complete_title"), final, "green")
+                        return response.text or ""
 
             if response.text:
                 messages.append(Message(role="assistant", content=response.text))
 
-        if streaming_card:
-            streaming_card.complete("⚠️ 达到最大迭代", _render_progress(), "yellow")
+        renderer.warn(t("agent.max_iterations"))
         return "Max iterations reached"
 
     def serve(self, schedules: list | None = None) -> None:
