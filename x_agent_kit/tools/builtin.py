@@ -37,6 +37,15 @@ def create_search_memory_tool(memory) -> Callable:
     return search_memory
 
 
+def create_clear_memory_tool(memory) -> Callable:
+    @tool("Clear all persistent memories. Use with caution — this deletes all saved analysis records.")
+    def clear_memory() -> str:
+        count = memory.count()
+        memory.clear()
+        return f"Cleared {count} memories."
+    return clear_memory
+
+
 def create_load_skill_tool(loader) -> Callable:
     @tool("Load a skill (domain knowledge) by name. Call this when you need specialized expertise.")
     def load_skill(name: str) -> str:

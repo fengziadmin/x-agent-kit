@@ -5,7 +5,7 @@ from loguru import logger
 from x_agent_kit.config import Config, load_config
 from x_agent_kit.models import BrainResponse, Message
 from x_agent_kit.skills.loader import SkillLoader
-from x_agent_kit.tools.builtin import create_list_skills_tool, create_load_skill_tool, create_notify_tool, create_request_approval_tool, create_save_memory_tool, create_recall_memories_tool, create_search_memory_tool, create_plan_tool, create_submit_plan_tool, create_get_plan_tool, create_execute_approved_steps_tool, create_update_step_tool, create_resubmit_step_tool
+from x_agent_kit.tools.builtin import create_list_skills_tool, create_load_skill_tool, create_notify_tool, create_request_approval_tool, create_save_memory_tool, create_recall_memories_tool, create_search_memory_tool, create_clear_memory_tool, create_plan_tool, create_submit_plan_tool, create_get_plan_tool, create_execute_approved_steps_tool, create_update_step_tool, create_resubmit_step_tool
 from x_agent_kit.tools.registry import ToolRegistry
 
 def create_brain(config: Config):
@@ -66,6 +66,7 @@ class Agent:
             self._tools.register(create_save_memory_tool(self._memory))
             self._tools.register(create_recall_memories_tool(self._memory))
             self._tools.register(create_search_memory_tool(self._memory))
+            self._tools.register(create_clear_memory_tool(self._memory))
 
             # Wire up feishu channel for async execution (WebSocket started in serve() only)
             feishu = self._channels.get("feishu")
