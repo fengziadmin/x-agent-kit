@@ -6,7 +6,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 import lark_oapi as lark
-from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody, PatchMessageRequest, PatchMessageRequestBody, ReplyMessageRequest, ReplyMessageRequestBody
+from lark_oapi.api.im.v1 import CreateMessageRequest, CreateMessageRequestBody, PatchMessageRequest, PatchMessageRequestBody, ReplyMessageRequest, ReplyMessageRequestBody, CreateMessageReactionRequest, CreateMessageReactionRequestBody, DeleteMessageReactionRequest
 from lark_oapi.event.callback.model.p2_card_action_trigger import P2CardActionTrigger, P2CardActionTriggerResponse
 from loguru import logger
 from x_agent_kit.channels.base import BaseChannel
@@ -123,10 +123,30 @@ class FeishuChannel(BaseChannel):
     def set_message_handler(self, handler) -> None:
         self._message_handler = handler
 
+    def add_reaction(self, message_id: str, emoji: str = "OnIt") -> str | None:
+        """Add an emoji reaction to a message. Returns reaction_id or None."""
+        try:
+            req = CreateMessageReactionRequest.builder().message_id(message_id).request_body(
+                CreateMessageReactionRequestBody.builder().reaction_type({"emoji_type": emoji}).build()
+            ).build()
+            resp = self._client.im.v1.message_reaction.create(req)
+            if resp.success() and resp.data:
+                return resp.data.reaction_id
+        except Exception as exc:
+            logger.debug(f"Add reaction failed: {exc}")
+        return None
+
+    def remove_reaction(self, message_id: str, reaction_id: str) -> None:
+        """Remove a reaction from a message."""
+        try:
+            req = DeleteMessageReactionRequest.builder().message_id(message_id).reaction_id(reaction_id).build()
+            self._client.im.v1.message_reaction.delete(req)
+        except Exception as exc:
+            logger.debug(f"Remove reaction failed: {exc}")
+
     def reply_text(self, message_id: str, text: str) -> dict[str, Any]:
         """Reply to a specific message (thread reply). Uses card for markdown rendering."""
         try:
-            # Build a card for proper markdown rendering
             card = {
                 "schema": "2.0",
                 "body": {"elements": [{"tag": "markdown", "content": text}]},

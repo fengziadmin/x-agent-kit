@@ -244,6 +244,10 @@ class Agent:
         if self._conversation and feishu and hasattr(feishu, 'set_message_handler'):
             def on_message(chat_id: str, text: str, message_id: str = ""):
                 logger.info(f"Incoming message from {chat_id}: {text[:50]}...")
+                # Show "processing" reaction immediately
+                reaction_id = None
+                if message_id and hasattr(feishu, 'add_reaction'):
+                    reaction_id = feishu.add_reaction(message_id, "OnIt")
                 self._conversation.add_message("user", text, chat_id)
                 ctx = self._conversation.get_context(chat_id)
                 context_str = "\n".join(f"[{m['role']}] {m['content']}" for m in ctx[:-1]) if len(ctx) > 1 else ""
@@ -258,6 +262,10 @@ class Agent:
                 # Reply to original message
                 if message_id and hasattr(feishu, 'reply_text'):
                     feishu.reply_text(message_id, result)
+                    # Replace "processing" reaction with "done"
+                    if reaction_id:
+                        feishu.remove_reaction(message_id, reaction_id)
+                    feishu.add_reaction(message_id, "DONE")
                     logger.info(f"Replied to message {message_id[:20]}...")
             feishu.set_message_handler(on_message)
             logger.info("Feishu message handler registered for bidirectional comms")
