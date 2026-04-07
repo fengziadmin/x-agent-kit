@@ -133,6 +133,13 @@ class Agent:
                 return notify_content or response.text or ""
 
             if response.tool_calls:
+                # Append assistant message with tool_calls BEFORE tool results
+                # OpenAI requires: assistant(tool_calls) → tool(result) ordering
+                messages.append(Message(
+                    role="assistant",
+                    content=response.text or "",
+                    tool_calls=response.tool_calls,
+                ))
                 for call in response.tool_calls:
                     if call.name == "notify":
                         if notified:
@@ -187,7 +194,7 @@ class Agent:
                         renderer.finish(t("agent.complete_title"), final, "green")
                         return response.text or ""
 
-            if response.text:
+            if response.text and not response.tool_calls:
                 messages.append(Message(role="assistant", content=response.text))
 
         renderer.warn(t("agent.max_iterations"))

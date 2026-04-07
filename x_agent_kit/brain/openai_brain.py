@@ -24,9 +24,31 @@ class OpenAIBrain(BaseBrain):
             oai.append({"role": "system", "content": system_prompt})
         for msg in messages:
             if msg.role == "tool_result":
-                oai.append({"role": "tool", "content": msg.content, "tool_call_id": msg.tool_call_id or ""})
+                oai.append({
+                    "role": "tool",
+                    "content": msg.content or "",
+                    "tool_call_id": msg.tool_call_id or "",
+                })
+            elif msg.role == "assistant" and msg.tool_calls:
+                # Assistant message with tool_calls — must include tool_calls
+                # for OpenAI to accept subsequent tool result messages
+                oai.append({
+                    "role": "assistant",
+                    "content": msg.content or "",
+                    "tool_calls": [
+                        {
+                            "id": tc.id,
+                            "type": "function",
+                            "function": {
+                                "name": tc.name,
+                                "arguments": json.dumps(tc.arguments),
+                            },
+                        }
+                        for tc in msg.tool_calls
+                    ],
+                })
             else:
-                oai.append({"role": msg.role, "content": msg.content})
+                oai.append({"role": msg.role, "content": msg.content or ""})
         return oai
 
     def _parse_response(self, response) -> BrainResponse:

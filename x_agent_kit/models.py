@@ -6,6 +6,7 @@ class Message:
     role: str  # "system" | "user" | "assistant" | "tool_result"
     content: str
     tool_call_id: str | None = None
+    tool_calls: list[ToolCall] | None = None
 
 @dataclass
 class ToolCall:
