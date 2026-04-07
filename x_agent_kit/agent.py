@@ -145,7 +145,7 @@ class Agent:
                         if notified:
                             messages.append(Message(
                                 role="tool_result", content="Already sent.",
-                                tool_call_id=call.name,
+                                tool_call_id=call.id,
                             ))
                             continue
                         notified = True
@@ -153,7 +153,7 @@ class Agent:
                         renderer.update_text(notify_content)
                         if not renderer._card:
                             self._tools.execute(call.name, call.arguments)
-                        messages.append(Message(role="tool_result", content="OK", tool_call_id=call.name))
+                        messages.append(Message(role="tool_result", content="OK", tool_call_id=call.id))
                         continue
 
                     if call.name == "request_approval":
@@ -163,7 +163,7 @@ class Agent:
                         logger.info(f"Tool call: {call.name}({call.arguments})")
                         result = self._tools.execute(call.name, call.arguments)
                         renderer.complete_step(label)
-                        messages.append(Message(role="tool_result", content=str(result), tool_call_id=call.name))
+                        messages.append(Message(role="tool_result", content=str(result), tool_call_id=call.id))
                         continue
 
                     if call.name == "load_skill":
@@ -172,7 +172,7 @@ class Agent:
                             logger.info(f"Skipping duplicate load_skill: {skill_name}")
                             messages.append(Message(
                                 role="tool_result", content=f"Skill '{skill_name}' already loaded.",
-                                tool_call_id=call.name,
+                                tool_call_id=call.id,
                             ))
                             continue
                         loaded_skills.add(skill_name)
@@ -185,7 +185,7 @@ class Agent:
 
                     logger.info(f"Tool call: {call.name}({call.arguments})")
                     result = self._tools.execute(call.name, call.arguments)
-                    messages.append(Message(role="tool_result", content=str(result), tool_call_id=call.name))
+                    messages.append(Message(role="tool_result", content=str(result), tool_call_id=call.id))
                     renderer.complete_step(label)
 
                     if self._stop_condition and self._stop_condition(call.name, result):
