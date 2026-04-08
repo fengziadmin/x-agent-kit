@@ -127,11 +127,20 @@ class ClaudeBrain(BaseBrain):
 
             parts.append("You have these tools available:\n" + "\n".join(tool_list))
             parts.append(
-                "\nTo call a tool, respond with ONLY a JSON object like this:\n"
-                '{"tool_calls": [{"name": "tool_name", "arguments": {"param": "value"}}]}\n'
-                "To give a final answer, respond with:\n"
-                '{"text": "your answer", "done": true}\n'
-                "Always respond with valid JSON. No other text."
+                "\n## OUTPUT FORMAT (STRICT JSON SCHEMA)\n\n"
+                "You MUST respond with ONLY a valid JSON object matching one of these two schemas:\n\n"
+                "Schema A — Call a tool:\n"
+                '```json\n{"tool_calls": [{"name": "<tool_name>", "arguments": {"<param>": "<value>"}}]}\n```\n\n'
+                "Schema B — Reply to user:\n"
+                '```json\n{"text": "<your reply>", "done": true}\n```\n\n'
+                "Schema C — Reply but continue (more tool calls needed):\n"
+                '```json\n{"text": "<intermediate message>", "done": false}\n```\n\n'
+                "RULES:\n"
+                "- Output ONLY the JSON object. No markdown, no explanation, no prefix.\n"
+                "- \"text\" must be a plain string, not nested JSON.\n"
+                "- \"tool_calls\" is an array of objects with \"name\" (string) and \"arguments\" (object).\n"
+                "- \"done\" is a boolean: true = conversation turn complete, false = more steps needed.\n"
+                "- NEVER output raw text without wrapping in {\"text\": \"...\"}."
             )
 
         for msg in messages:
@@ -167,14 +176,16 @@ class ClaudeBrain(BaseBrain):
             parts.append("Continue with the next step.")
 
         parts.append(
-            "\nRespond with JSON: "
-            '{"tool_calls": [...]} or {"text": "...", "done": true}'
+            "\nRespond with ONLY valid JSON: "
+            '{"tool_calls": [{"name": "...", "arguments": {...}}]} '
+            'or {"text": "your reply", "done": true}. '
+            "No other text outside the JSON."
         )
 
         return "\n".join(parts)
 
     def _parse_output(self, output: str) -> BrainResponse:
-        """Parse claude CLI JSON output."""
+        """Parse claude CLI JSON output with schema validation."""
         if not output:
             return BrainResponse(text="")
 
@@ -185,87 +196,98 @@ class ClaudeBrain(BaseBrain):
             if isinstance(data, dict) and "result" in data:
                 inner = data["result"]
                 if isinstance(inner, str):
-                    # Try to parse the inner result as JSON (tool calls)
-                    # Handle mixed text+JSON: "Some text\n\n{\"tool_calls\": [...]}"
-                    result = self._parse_inner(inner)
-                    if result.text and not result.tool_calls:
-                        # Maybe JSON is embedded in text, try to extract it
-                        extracted = self._extract_json_from_text(inner)
-                        if extracted.tool_calls:
-                            return extracted
+                    result = self._validate_and_parse(inner)
                     return result
                 return BrainResponse(text=str(inner))
 
             # Direct JSON response
-            return self._parse_inner(output)
+            return self._validate_and_parse(output)
 
         except json.JSONDecodeError:
-            # Try to extract JSON from mixed text
-            return self._extract_json_from_text(output)
+            return self._extract_text_fallback(output)
 
-    def _parse_inner(self, text: str) -> BrainResponse:
-        """Parse the inner content which may contain tool calls."""
+    def _validate_and_parse(self, raw: str) -> BrainResponse:
+        """Parse and validate against expected schema.
+
+        Expected schemas:
+          A: {"tool_calls": [{"name": str, "arguments": dict}]}
+          B: {"text": str, "done": bool}
+          C: {"text": str, "done": false}
+        """
+        # Step 1: Try JSON parse
         try:
-            data = json.loads(text) if isinstance(text, str) else text
+            data = json.loads(raw) if isinstance(raw, str) else raw
         except (json.JSONDecodeError, TypeError):
-            # Fallback: if text looks like JSON with a "text" field, try to extract it
-            if isinstance(text, str) and '"text"' in text:
-                import re
-                match = re.search(r'"text"\s*:\s*"((?:[^"\\]|\\.)*)"\s*[,}]', text)
-                if match:
-                    extracted = match.group(1).replace('\\"', '"').replace('\\n', '\n').replace('\\\\', '\\')
-                    return BrainResponse(text=extracted)
-            return BrainResponse(text=str(text))
+            # JSON parse failed — try to extract text field via regex
+            return self._extract_text_fallback(raw)
 
-        if isinstance(data, dict):
-            tool_calls = None
-            if data.get("tool_calls"):
-                tool_calls = [
-                    ToolCall(
-                        id=tc.get("name", str(i)),
-                        name=tc["name"],
-                        arguments=tc.get("arguments", {}),
-                    )
-                    for i, tc in enumerate(data["tool_calls"])
-                ]
+        if not isinstance(data, dict):
+            return BrainResponse(text=str(data))
+
+        # Step 2: Schema A — tool_calls
+        if "tool_calls" in data and isinstance(data["tool_calls"], list):
+            tool_calls = []
+            for i, tc in enumerate(data["tool_calls"]):
+                if not isinstance(tc, dict) or "name" not in tc:
+                    continue
+                tool_calls.append(ToolCall(
+                    id=tc.get("name", str(i)),
+                    name=tc["name"],
+                    arguments=tc.get("arguments", {}),
+                ))
+            if tool_calls:
+                return BrainResponse(tool_calls=tool_calls, text=data.get("text"))
+
+        # Step 3: Schema B/C — text response
+        if "text" in data and isinstance(data["text"], str):
             return BrainResponse(
-                text=data.get("text"),
-                tool_calls=tool_calls,
-                done=data.get("done", False),
+                text=data["text"],
+                done=bool(data.get("done", True)),
             )
 
-        return BrainResponse(text=str(data))
+        # Step 4: Has text key but wrong type — coerce
+        if "text" in data:
+            return BrainResponse(text=str(data["text"]), done=True)
 
-    def _extract_json_from_text(self, text: str) -> BrainResponse:
-        """Try to find JSON in text that may have extra content."""
+        # Step 5: Unknown schema — try to extract useful content
+        # Maybe LLM returned {"answer": "..."} or similar
+        for key in ("answer", "response", "content", "message", "reply"):
+            if key in data and isinstance(data[key], str):
+                logger.warning(f"Non-standard schema: found '{key}' instead of 'text'")
+                return BrainResponse(text=data[key], done=True)
+
+        # Step 6: Give up, return string representation
+        logger.warning(f"Unrecognized response schema: {list(data.keys())}")
+        return BrainResponse(text=str(raw), done=True)
+
+    def _extract_text_fallback(self, raw: str) -> BrainResponse:
+        """Last resort: extract text from malformed output."""
+        if not isinstance(raw, str):
+            return BrainResponse(text=str(raw))
+
         import re
-        # Find the start of a JSON object containing tool_calls
-        idx = text.find('{"tool_calls"')
-        if idx == -1:
-            idx = text.find('{ "tool_calls"')
-        if idx >= 0:
-            # Extract from { to the end, try parsing progressively shorter substrings
-            candidate = text[idx:]
-            for end in range(len(candidate), 0, -1):
-                try:
-                    data = json.loads(candidate[:end])
-                    return self._parse_inner(candidate[:end])
-                except (json.JSONDecodeError, ValueError):
-                    continue
 
-        # Fallback: regex for any JSON with tool_calls
-        match = re.search(r'\{.*"tool_calls".*\}', text, re.DOTALL)
+        # Try to find {"text": "..."} pattern
+        match = re.search(r'"text"\s*:\s*"((?:[^"\\]|\\.)*)"', raw)
         if match:
+            text = match.group(1)
+            text = text.replace('\\"', '"').replace('\\n', '\n').replace('\\\\', '\\')
+            return BrainResponse(text=text, done=True)
+
+        # Try to find {"tool_calls": [...]} pattern
+        tc_match = re.search(r'\{"tool_calls"\s*:\s*\[.*?\]\}', raw, re.DOTALL)
+        if tc_match:
             try:
-                return self._parse_inner(match.group())
+                return self._validate_and_parse(tc_match.group())
             except Exception:
                 pass
 
-        match = re.search(r'\{[^{}]*"text"[^{}]*\}', text, re.DOTALL)
-        if match:
-            try:
-                return self._parse_inner(match.group())
-            except Exception:
-                pass
+        # Nothing parseable — return as plain text (strip JSON wrapper if present)
+        clean = raw.strip()
+        if clean.startswith('{') and clean.endswith('}'):
+            # Looks like broken JSON, don't show to user
+            logger.warning(f"Unparseable JSON response ({len(clean)} chars)")
+            return BrainResponse(text="抱歉，处理出现异常，请重试。", done=True)
 
-        return BrainResponse(text=text)
+        return BrainResponse(text=clean, done=True)
+
