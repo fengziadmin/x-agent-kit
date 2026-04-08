@@ -208,6 +208,13 @@ class ClaudeBrain(BaseBrain):
         try:
             data = json.loads(text) if isinstance(text, str) else text
         except (json.JSONDecodeError, TypeError):
+            # Fallback: if text looks like JSON with a "text" field, try to extract it
+            if isinstance(text, str) and '"text"' in text:
+                import re
+                match = re.search(r'"text"\s*:\s*"((?:[^"\\]|\\.)*)"\s*[,}]', text)
+                if match:
+                    extracted = match.group(1).replace('\\"', '"').replace('\\n', '\n').replace('\\\\', '\\')
+                    return BrainResponse(text=extracted)
             return BrainResponse(text=str(text))
 
         if isinstance(data, dict):
