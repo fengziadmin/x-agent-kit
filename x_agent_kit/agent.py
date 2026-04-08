@@ -126,7 +126,11 @@ class Agent:
             logger.info(f"Agent iteration {i+1}/{max_iter}")
             renderer.update_text(t("agent.thinking"))
 
-            response = self._brain.think(messages=messages, tools=self._tools.schemas())
+            response = self._brain.think(
+                messages=messages,
+                tools=self._tools.schemas(),
+                system_prompt=self._config.system_prompt,
+            )
             if response.done or (response.text and not response.tool_calls):
                 final = notify_content or response.text or t("agent.complete")
                 renderer.finish(t("agent.complete_title"), final, "green")
