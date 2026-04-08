@@ -26,7 +26,6 @@ class FeishuChannel(BaseChannel):
         self._tool_executor = None
         self._plan_manager = None
         self._message_handler = None
-        self._card_action_handler = None
         self._handled_messages: set[str] = set()
 
     def send_text(self, text: str) -> dict[str, Any]:
@@ -126,15 +125,6 @@ class FeishuChannel(BaseChannel):
 
     def set_message_handler(self, handler) -> None:
         self._message_handler = handler
-
-    def set_card_action_handler(self, handler) -> None:
-        """Set a custom handler for card button callbacks.
-
-        Called when a card action's value doesn't match plan/approval routes.
-        Handler signature: ``handler(value: dict, msg_id: str) -> None``
-        where ``value`` is the button's behaviors[].value dict.
-        """
-        self._card_action_handler = handler
 
     def _get_bot_open_id(self) -> str:
         """Get and cache the bot's open_id via Feishu REST API."""
@@ -369,17 +359,6 @@ class FeishuChannel(BaseChannel):
                             threading.Thread(target=execute, daemon=True).start()
                 elif decision == "reject" and self._approval_queue:
                     self._approval_queue.resolve(request_id, "REJECTED")
-                return resp
-
-            # --- Custom card action handler (fallback for non-plan/non-approval) ---
-            if self._card_action_handler and value:
-                try:
-                    logger.info(f"Custom card action: {value}")
-                    self._card_action_handler(value, msg_id)
-                except Exception as handler_exc:
-                    logger.error(f"Custom card action handler error: {handler_exc}")
-                return resp
-
         except Exception as exc:
             logger.error(f"Card callback error: {exc}")
         return resp

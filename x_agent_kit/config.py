@@ -87,9 +87,9 @@ class Config:
     skills: SkillsConfig
     agent: AgentConfig
     memory: MemoryConfig = field(default_factory=MemoryConfig)
-    system_prompt: str = ""
     schedules: list[ScheduleConfig] = field(default_factory=list)
     locale: str = "zh_CN"
+    system_prompt: str = ""
 
 
 def _env(key: str, default: str = "") -> str:
@@ -157,51 +157,6 @@ def _build_channels_from_env() -> dict[str, Any]:
     return channels
 
 
-def _load_identity(config_dir: str = ".agent") -> str:
-    """Load IDENTITY.md + SOUL.md + AGENTS.md from the active identity directory.
-
-    Reads XAGENT_IDENTITY env var to select which identity to load from
-    ``{config_dir}/identities/{identity}/``. Falls back to the first
-    identity found if env var is not set.
-
-    Returns concatenated content, or empty string if no identity files found.
-    """
-    identity_name = _env("XAGENT_IDENTITY", "")
-    base = Path(config_dir) / "identities"
-
-    if not base.exists():
-        return ""
-
-    # Resolve identity directory
-    if identity_name:
-        identity_dir = base / identity_name
-    else:
-        # Auto-detect: use first directory that has at least one .md file
-        identity_dir = None
-        for d in sorted(base.iterdir()):
-            if d.is_dir() and any(d.glob("*.md")):
-                identity_dir = d
-                break
-        if identity_dir is None:
-            return ""
-
-    if not identity_dir.exists():
-        logger.warning(f"Identity directory not found: {identity_dir}")
-        return ""
-
-    # Load in order: IDENTITY → SOUL → AGENTS
-    parts = []
-    for filename in ["IDENTITY.md", "SOUL.md", "AGENTS.md"]:
-        filepath = identity_dir / filename
-        if filepath.is_file():
-            parts.append(filepath.read_text(encoding="utf-8").strip())
-
-    if parts:
-        logger.info(f"Loaded identity: {identity_dir.name} ({len(parts)} files)")
-
-    return "\n\n".join(parts)
-
-
 def _load_from_env() -> Config:
     """Build Config entirely from environment variables."""
     provider_name = _env("XAGENT_BRAIN_PROVIDER", "openai")
@@ -236,7 +191,6 @@ def _load_from_env() -> Config:
             enabled=_env_bool("XAGENT_MEMORY_ENABLED", True),
             dir=_env("XAGENT_MEMORY_DIR", ".agent/memory"),
         ),
-        system_prompt=_load_identity(".agent"),
         locale=_env("XAGENT_LOCALE", "zh_CN"),
     )
 
@@ -281,7 +235,6 @@ def _load_from_file(config_dir: str) -> Config:
         skills=skills,
         agent=agent,
         memory=memory,
-        system_prompt=_load_identity(config_dir),
         schedules=schedules,
         locale=locale,
     )
@@ -349,11 +302,53 @@ def _merge_env_overrides(config: Config) -> Config:
     return config
 
 
+def _load_identity(config_dir: str) -> str:
+    """Load IDENTITY.md + SOUL.md + AGENTS.md as system prompt.
+
+    Reads XAGENT_IDENTITY env var to select which identity to load.
+    Searches in ``<config_dir>/identities/<name>/``.
+    Returns concatenated content, or empty string if not found.
+    """
+    identity_name = _env("XAGENT_IDENTITY")
+    base = Path(config_dir) / "identities"
+
+    if not base.exists():
+        return ""
+
+    # Find identity directory
+    if identity_name:
+        identity_dir = base / identity_name
+    else:
+        # Default: first directory found
+        dirs = [d for d in base.iterdir() if d.is_dir()]
+        if not dirs:
+            return ""
+        identity_dir = dirs[0]
+        identity_name = identity_dir.name
+
+    if not identity_dir.exists():
+        logger.warning(f"Identity '{identity_name}' not found at {identity_dir}")
+        return ""
+
+    # Load files in order: IDENTITY → SOUL → AGENTS
+    parts = []
+    for filename in ("IDENTITY.md", "SOUL.md", "AGENTS.md"):
+        filepath = identity_dir / filename
+        if filepath.is_file():
+            parts.append(filepath.read_text(encoding="utf-8").strip())
+
+    if parts:
+        logger.info(f"Loaded identity '{identity_name}' ({len(parts)} files)")
+
+    return "\n\n".join(parts)
+
+
 def load_config(config_dir: str = ".agent") -> Config:
     """Load configuration with priority: env vars > settings.json > defaults.
 
     If settings.json exists, loads it first then applies env var overrides.
     If settings.json doesn't exist, builds config entirely from env vars.
+    Then loads identity files (IDENTITY.md + SOUL.md + AGENTS.md) as system_prompt.
     """
     config_path = Path(config_dir) / "settings.json"
 
@@ -364,6 +359,9 @@ def load_config(config_dir: str = ".agent") -> Config:
     else:
         logger.debug("No settings.json found, loading config from environment variables")
         config = _load_from_env()
+
+    # Load identity as system prompt
+    config.system_prompt = _load_identity(config_dir)
 
     logger.debug(f"Config: brain={config.brain.provider}/{config.brain.model}, "
                  f"channel={config.channels.get('default', 'cli')}")
