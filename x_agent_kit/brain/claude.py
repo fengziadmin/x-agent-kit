@@ -162,8 +162,21 @@ class ClaudeBrain(BaseBrain):
     def _build_resume_prompt(
         self, messages: list[Message], tools: list[dict]
     ) -> str:
-        """Build prompt for resume — only include recent tool results."""
+        """Build prompt for resume — include tool results + tool reminder."""
         parts = []
+
+        # Remind available tools (Claude CLI may lose context on resume)
+        if tools:
+            tool_names = []
+            for t in tools:
+                func = t.get("function", {})
+                name = func.get("name", "")
+                desc = func.get("description", "")
+                if name:
+                    tool_names.append(f"- {name}: {desc}")
+            if tool_names:
+                parts.append("Reminder — available tools:\n" + "\n".join(tool_names))
+
         # Find the last assistant message and only include messages after it
         last_assistant_idx = -1
         for i, msg in enumerate(messages):
@@ -174,7 +187,7 @@ class ClaudeBrain(BaseBrain):
 
         for msg in recent:
             if msg.role == "tool_result":
-                parts.append(f"Tool result ({msg.tool_call_id}): {msg.content}")
+                parts.append(f"\nTool result ({msg.tool_call_id}): {msg.content}")
             elif msg.role == "user":
                 parts.append(msg.content)
 
