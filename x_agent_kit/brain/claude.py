@@ -232,7 +232,38 @@ class ClaudeBrain(BaseBrain):
           A: {"tool_calls": [{"name": str, "arguments": dict}]}
           B: {"text": str, "done": bool}
           C: {"text": str, "done": false}
+
+        Claude CLI sometimes returns multiple JSON objects concatenated
+        (e.g., {"text": "...", "done": false}\\n\\n{"tool_calls": [...]}).
+        When this happens, tool_calls takes priority.
         """
+        # Step 0: If raw contains tool_calls anywhere, extract and prioritize it
+        if isinstance(raw, str) and '"tool_calls"' in raw:
+            import re
+            # Find the JSON object containing tool_calls
+            tc_match = re.search(r'\{[^{}]*"tool_calls"\s*:\s*\[.*?\]\s*\}', raw, re.DOTALL)
+            if tc_match:
+                try:
+                    tc_data = json.loads(tc_match.group())
+                    if tc_data.get("tool_calls"):
+                        tool_calls = []
+                        for i, tc in enumerate(tc_data["tool_calls"]):
+                            if isinstance(tc, dict) and "name" in tc:
+                                tool_calls.append(ToolCall(
+                                    id=tc.get("name", str(i)),
+                                    name=tc["name"],
+                                    arguments=tc.get("arguments", {}),
+                                ))
+                        if tool_calls:
+                            # Also extract text from the other JSON if present
+                            text = None
+                            text_match = re.search(r'\{"text"\s*:\s*"((?:[^"\\]|\\.)*)"', raw)
+                            if text_match:
+                                text = text_match.group(1).replace('\\"', '"').replace('\\n', '\n')
+                            return BrainResponse(tool_calls=tool_calls, text=text)
+                except (json.JSONDecodeError, KeyError):
+                    pass
+
         # Step 1: Try JSON parse
         try:
             data = json.loads(raw) if isinstance(raw, str) else raw
