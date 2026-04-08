@@ -131,7 +131,13 @@ class Agent:
                 tools=self._tools.schemas(),
                 system_prompt=self._config.system_prompt,
             )
-            if response.done or (response.text and not response.tool_calls):
+            if response.done:
+                final = notify_content or response.text or t("agent.complete")
+                renderer.finish(t("agent.complete_title"), final, "green")
+                return notify_content or response.text or ""
+
+            # Text without tool_calls and done not explicitly set — treat as final
+            if response.text and not response.tool_calls and response.done is not False:
                 final = notify_content or response.text or t("agent.complete")
                 renderer.finish(t("agent.complete_title"), final, "green")
                 return notify_content or response.text or ""

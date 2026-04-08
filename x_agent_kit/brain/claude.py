@@ -34,15 +34,16 @@ class ClaudeBrain(BaseBrain):
         tools: list[dict],
         system_prompt: str = "",
     ) -> BrainResponse:
-        if self._first_call:
-            return self._first_think(messages, tools, system_prompt)
-        else:
-            return self._resume_think(messages, tools)
+        # Always use _first_think with full prompt + tools + system_prompt.
+        # In serve() mode each run() is independent; session resume causes
+        # context bloat and missing tool definitions on subsequent iterations.
+        return self._first_think(messages, tools, system_prompt)
 
     def _first_think(
         self, messages: list[Message], tools: list[dict], system_prompt: str
     ) -> BrainResponse:
-        """First call: start a new session."""
+        """Start a new CLI session with full prompt."""
+        self._session_id = str(uuid.uuid4())  # fresh session each time
         prompt = self._build_prompt(messages, tools)
 
         cmd = [
