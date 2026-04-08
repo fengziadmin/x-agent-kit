@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "x-agent-kit"
-version = "0.3.5"
+version = "0.3.6"
 description = "Build autonomous AI agents with pluggable brains, tools, skills, and channels"
 readme = "README.md"
 requires-python = ">=3.11"

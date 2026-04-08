@@ -107,6 +107,10 @@ class Agent:
             self._tools.register(t)
 
     def run(self, task: str) -> str:
+        # Fresh session for each run() — prevents context bleed between messages
+        if hasattr(self._brain, 'new_session'):
+            self._brain.new_session()
+
         if self._memory is not None:
             mem_summary = self._memory.summary()
             task_with_memory = f"{mem_summary}\n\n{task}"

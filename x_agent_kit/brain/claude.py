@@ -28,22 +28,27 @@ class ClaudeBrain(BaseBrain):
         self._session_id = str(uuid.uuid4())
         self._first_call = True
 
+    def new_session(self) -> None:
+        """Start a fresh session. Called by Agent.run() at the start of each task."""
+        self._session_id = str(uuid.uuid4())
+        self._first_call = True
+
     def think(
         self,
         messages: list[Message],
         tools: list[dict],
         system_prompt: str = "",
     ) -> BrainResponse:
-        # Always use _first_think with full prompt + tools + system_prompt.
-        # In serve() mode each run() is independent; session resume causes
-        # context bloat and missing tool definitions on subsequent iterations.
-        return self._first_think(messages, tools, system_prompt)
+        if self._first_call:
+            self._first_call = False
+            return self._first_think(messages, tools, system_prompt)
+        else:
+            return self._resume_think(messages, tools)
 
     def _first_think(
         self, messages: list[Message], tools: list[dict], system_prompt: str
     ) -> BrainResponse:
         """Start a new CLI session with full prompt."""
-        self._session_id = str(uuid.uuid4())  # fresh session each time
         prompt = self._build_prompt(messages, tools)
 
         cmd = [
